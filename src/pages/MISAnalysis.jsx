@@ -18,9 +18,10 @@ import {
   Wallet, Tag, Clock, Target, BarChart3, Info, Download,
   ClipboardList, FileText, Send, ThumbsUp, ThumbsDown, Lock
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { storage } from "../services/firebase";
+import { storage, db } from "../services/firebase";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
   const inputRef = useRef(null);
@@ -66,7 +67,7 @@ const tabs = [
   'All', 'New Bookings', 'Transfers', 'Anomaly', 'Name Corrections', 'Cancellations',
   'Agreement Value Change', 'Demand Raised Change', 'Amount Received Change',
   'O/S against Demand Value', 'O/S against Sale Value', 'Debtors Aging',
-  'Inventory Summary', 'Planned vs Actual', 'MSP Analysis'
+  'MSP Analysis'
 ];
 
 const statusMap = {
@@ -84,7 +85,19 @@ export default function MISAnalysis() {
   const isMaker = selectedProject?.role === "MAKER";
   const isReviewer = selectedProject?.role === "REVIEWER";
   const isManager = selectedProject?.role === "MANAGER";
-  const sanityPassed = JSON.parse(localStorage.getItem("sanityPassed") || "false");
+  const [sanityPassed, setSanityPassed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("sanityPassed")) || false; }
+    catch { return false; }
+  });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try { setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false); }
+      catch { setSanityPassed(false); }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   const [files, setFiles] = useState({ prev: null, curr: null });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -105,6 +118,9 @@ export default function MISAnalysis() {
 const [frozenMISMetadata, setFrozenMISMetadata] = useState(null);
 const [frozenFileLoading, setFrozenFileLoading] = useState(false);
 const [frozenFileLoaded, setFrozenFileLoaded] = useState(false);
+const [rowRemarks, setRowRemarks] = useState({});
+const [rowAttachments, setRowAttachments] = useState({});
+const [rowAttachmentURLs, setRowAttachmentURLs] = useState({});
 
   // Submission states
   const [allSubmissions, setAllSubmissions] = useState([]);
@@ -119,7 +135,20 @@ const managerCommentRef = useRef("");
   const columnFilterRef = useRef(null);
   const analysisTablesRef = useRef(null);
   const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-  const agingColumns = ["Upto 30 days", "30 - 60 days", "Greater than 60 days", "Total aging"];
+  const agingColumns = ["Upto 30 days", "30 - 60 days", "60 - 90 days", "90 - 180 days", "180 - 365 days", "Greater than 365 days", "Total aging"];
+const MSP_COLS = ['MSP_Rate', 'MSP_Variance', 'MSP_Flag'];
+
+const orderedColumns = (() => {
+  const keys = Object.keys(visibleColumns).filter(h => h !== "Change Details" && !MSP_COLS.includes(h));
+  const agreementIdx = keys.indexOf("Agreement value");
+  if (agreementIdx !== -1) {
+    keys.splice(agreementIdx + 1, 0, ...MSP_COLS.filter(c => visibleColumns[c] !== undefined));
+  } else {
+    keys.push(...MSP_COLS.filter(c => visibleColumns[c] !== undefined));
+  }
+  keys.push("Change Details");
+  return keys;
+})();
 
 useEffect(() => {
   const projectId = selectedProject?.projectId;
@@ -250,7 +279,10 @@ useEffect(() => {
       cancelledAmountReceived: 0, cancellations: 0,
       agingUpto30Amt: 0, agingUpto30Units: 0,
       aging3060Amt: 0, aging3060Units: 0,
-      aging60PlusAmt: 0, aging60PlusUnits: 0,
+      aging6090Amt: 0, aging6090Units: 0,
+      aging90180Amt: 0, aging90180Units: 0,
+      aging180365Amt: 0, aging180365Units: 0,
+      aging365PlusAmt: 0, aging365PlusUnits: 0,
       totalAgingAmt: 0,
     };
     extractedData.filter(r => r.Status === 'CANCELLATION').forEach(r => {
@@ -273,10 +305,16 @@ useEffect(() => {
       if (a > 0) t.agreementIncrement += a; else if (a < 0) t.agreementDecrement += Math.abs(a);
       const v30 = getNum(r["Upto 30 days"]);
       const v3060 = getNum(r["30 - 60 days"]);
-      const v60 = getNum(r["Greater than 60 days"]);
+      const v6090 = getNum(r["60 - 90 days"]);
+      const v90180 = getNum(r["90 - 180 days"]);
+      const v180365 = getNum(r["180 - 365 days"]);
+      const v365plus = getNum(r["Greater than 365 days"]);
       if (v30 > 0) { t.agingUpto30Amt += v30; t.agingUpto30Units++; }
       if (v3060 > 0) { t.aging3060Amt += v3060; t.aging3060Units++; }
-      if (v60 > 0) { t.aging60PlusAmt += v60; t.aging60PlusUnits++; }
+      if (v6090 > 0) { t.aging6090Amt += v6090; t.aging6090Units++; }
+      if (v90180 > 0) { t.aging90180Amt += v90180; t.aging90180Units++; }
+      if (v180365 > 0) { t.aging180365Amt += v180365; t.aging180365Units++; }
+      if (v365plus > 0) { t.aging365PlusAmt += v365plus; t.aging365PlusUnits++; }
       t.totalAgingAmt += getNum(r["Total aging"]);
     });
     t.netAreaSold = t.actualAreaSold - t.cancelledAreaSold;
@@ -314,8 +352,8 @@ useEffect(() => {
       if (msp === 0) { noMSP.push({ ...r, msp: 0, variance: 0 }); return; }
       const variance = ratePerSft - msp;
       const entry = { ...r, msp, variance, ratePerSft };
-      if (ratePerSft < msp) belowMSP.push(entry);
-      else atMSP.push(entry);
+      if (Math.round(ratePerSft * 100) < Math.round(msp * 100)) belowMSP.push(entry);
+else atMSP.push(entry);
     });
     return { belowMSP, atMSP, noMSP };
   }, [extractedData, mspData]);
@@ -444,11 +482,8 @@ useEffect(() => {
     if (resRows.length) { final.push(...resRows); final.push(makeSubtotal(resRows, 'Total Residential')); }
     if (comRows.length) { final.push(...comRows); final.push(makeSubtotal(comRows, 'Total Commercial')); }
     if (dataRows.length) {
-      final.push(makeSubtotal(dataRows,
-        resRows.length && comRows.length ? 'Grand Total (Res + Com)' :
-        resRows.length ? 'Total Residential' : 'Total Commercial'
-      ));
-    }
+  final.push(makeSubtotal(dataRows, 'Grand Total'));
+}
     return final;
   }, [inventoryData, extractedData, mspData]);
 
@@ -513,7 +548,13 @@ useEffect(() => {
   const processedData = useMemo(() => {
     let data = [...extractedData];
     if (activeTab === 'Debtors Aging') {
-      data = data.filter(r => getNum(r["30 - 60 days"]) > 0 || getNum(r["Greater than 60 days"]) > 0);
+      data = data.filter(r => 
+  getNum(r["30 - 60 days"]) > 0 || 
+  getNum(r["60 - 90 days"]) > 0 || 
+  getNum(r["90 - 180 days"]) > 0 || 
+  getNum(r["180 - 365 days"]) > 0 || 
+  getNum(r["Greater than 365 days"]) > 0
+);
     } else if (statusMap[activeTab]) {
       data = data.filter(r => r.Status === statusMap[activeTab]);
     } else if (activeTab === 'O/S against Demand Value' && selectedAgingFilter) {
@@ -533,6 +574,16 @@ useEffect(() => {
     }
     return data;
   }, [extractedData, activeTab, searchTerm, selectedAgingFilter, selectedSaleFilter]);
+
+  const handleAttachmentUpload = async (unitNo, file) => {
+    const uploadRef = ref(storage, `projects/${selectedProject.projectId}/bookingAttachments/${unitNo}_${file.name}`);
+    await uploadBytes(uploadRef, file);
+    const url = await getDownloadURL(uploadRef);
+    setRowAttachmentURLs(prev => ({
+      ...prev,
+      [unitNo]: [...(prev[unitNo] || []), { name: file.name, url }]
+    }));
+  };
 
   const runComparison = async () => {
   setIsProcessing(true);
@@ -567,17 +618,49 @@ useEffect(() => {
     const data = await res.json();
 
     if (data.status === "success") {
-      setExtractedData(data.extracted_data || []);
+  const mspRates = mspData?.rates || [];
+  const enriched = (data.extracted_data || []).map(row => {
+    if (row.Status !== 'NEW' || !isUnitSold(row["Customer Name"])) return row;
+    const tower = String(row["Tower"] || '').trim().toLowerCase();
+    const unitType = String(row["Unit Type"] || '').trim().toLowerCase();
+    const ratePerSft = getNum(row["Rate per sft"]);
+    const unitNo = String(row["Unit No."] || '').trim().toLowerCase();
+    const unitLevelMatch = mspRates.find(m => String(m.unitNo || '').trim().toLowerCase() === unitNo);
+    let msp = 0;
+    if (unitLevelMatch) {
+      msp = unitLevelMatch.mspRate;
+    } else {
+      const matchingRates = mspRates.filter(m => {
+        const mTower = String(m.tower || '').trim().toLowerCase();
+        const mType = String(m.unitType || '').trim().toLowerCase();
+        const typeMatches = mType === unitType ||
+          (unitType === 'shop' && mType === 'commercial') ||
+          (unitType === 'commercial' && mType === 'shop');
+        const towerMatches = mTower === tower || mTower.startsWith(tower);
+        return towerMatches && typeMatches;
+      });
+      if (matchingRates.length > 0) msp = Math.max(...matchingRates.map(m => m.mspRate));
+    }
+    const variance = msp > 0 ? ratePerSft - msp : 0;
+    const mspFlag = msp === 0 ? 'NO MSP' : variance < 0 ? 'BELOW MSP' : 'AT/ABOVE MSP';
+    return { ...row, MSP_Rate: msp, MSP_Variance: variance, MSP_Flag: mspFlag };
+  });
+  setExtractedData(enriched);
       setUnitStats({ total: data.total_unit_count, sold: data.sold_units, unsold: data.unsold_units });
       setActiveTab('All');
-      if (data.extracted_data?.length > 0) {
-        const cols = {};
-        const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
-          'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-          'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
-        Object.keys(data.extracted_data[0]).forEach(k => { if (!skip.includes(k)) cols[k] = true; });
-        setVisibleColumns(cols);
-      }
+      if (enriched?.length > 0) {
+  const cols = {};
+  const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
+    'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
+    'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+  
+  // Collect ALL keys from ALL rows so MSP fields from NEW rows are included
+  const allKeys = new Set();
+  enriched.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+  allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+  
+  setVisibleColumns(cols);
+}
     }
   } catch (err) {
     console.error(err);
@@ -604,8 +687,14 @@ try {
   console.error("File upload error:", uploadErr);
 }
 
+const enrichedWithRemarks = extractedData.map(row => ({
+  ...row,
+  makerRemark: rowRemarks[row["Unit No."]] || "",
+  makerAttachments: rowAttachmentURLs[row["Unit No."]] || [],
+}));
+
 const result = await submitMISForReview(selectedProject.projectId, monthYear, {
-  extractedData,
+  extractedData: enrichedWithRemarks,
   unitStats,
   makerComment: makerCommentRef.current,
   submittedBy: currentUser.email,
@@ -615,6 +704,8 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     if (result.success) {
       setCurrentSubmissionStatus('PENDING_REVIEW');
       makerCommentRef.current = '';
+      localStorage.setItem("misSubmitted", JSON.stringify(true));
+      window.dispatchEvent(new Event("storage"));
       alert('✅ Submitted for Review successfully!');
     } else {
       alert('Error submitting: ' + result.error);
@@ -677,7 +768,11 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       console.error("Storage upload error:", storageErr);
     }
 
-    alert('✅ Final Approved! Month is now frozen.');
+    // Lock MIS Analysis again — Sanity must be re-run for next month
+    localStorage.removeItem("sanityPassed");
+    localStorage.removeItem("misSubmitted");
+    window.dispatchEvent(new Event("storage"));
+    alert('✅ Final Approved! Month is now frozen. MIS Analysis is now locked for next month cycle.');
   } else {
     await managerRejectMIS(
       selectedProject.projectId,
@@ -709,6 +804,93 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     XLSX.writeFile(wb, `MIS_Analysis_${files.curr?.name?.replace(/\.[^/.]+$/, "") || "Result"}.xlsx`);
   };
 
+
+  const downloadOSAgainstDemand = (type, summaryData, isOSDemand) => {
+    const wb = XLSX.utils.book_new();
+    const ws = {};
+    const navyFill  = { type: "pattern", pattern: "solid", fgColor: { rgb: "1F3864" } };
+    const amberFill = { type: "pattern", pattern: "solid", fgColor: { rgb: "FFF2CC" } };
+    const whiteFill = { type: "pattern", pattern: "solid", fgColor: { rgb: "FFFFFF" } };
+    const whiteFont = { bold: true, color: { rgb: "FFFFFF" }, name: "Arial", sz: 9 };
+    const boldFont  = { bold: true, name: "Arial", sz: 9 };
+    const normFont  = { name: "Arial", sz: 9 };
+    const centerAlign = { horizontal: "center", vertical: "center", wrapText: true };
+    const rightAlign  = { horizontal: "right", vertical: "center" };
+    const leftAlign   = { horizontal: "left", vertical: "center" };
+    const thinBorder = {
+      top:    { style: "thin", color: { rgb: "CCCCCC" } },
+      bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+      left:   { style: "thin", color: { rgb: "CCCCCC" } },
+      right:  { style: "thin", color: { rgb: "CCCCCC" } },
+    };
+    const makeCell = (v, font, fill, alignment, numFmt) => ({
+      v, t: typeof v === "number" ? "n" : "s",
+      s: { font, fill, alignment, border: thinBorder, ...(numFmt ? { numFmt } : {}) },
+    });
+    const encodeCell = (r, c) => XLSX.utils.encode_cell({ r, c });
+    const headers = isOSDemand
+      ? ["Outstanding Range", "Units", "Agreement Value (Cr)", "Demand Raised (Cr)", "Amount Received (Cr)", "Receivable (Cr)"]
+      : ["Outstanding Range", "Units", "Agreement Value (Cr)", "Amount Received (Cr)", "Receivable (Cr)"];
+    headers.forEach((h, c) => {
+      ws[encodeCell(0, c)] = makeCell(h, whiteFont, navyFill, centerAlign);
+    });
+    const data = summaryData[type];
+    let rowIdx = 1;
+    const ranges = ["Upto 10%", "11-20%", "21-30%", "31-50%", "51-80%", "80% above", "No O/S", "Excess Collection"];
+    const CR = 10000000;
+    const totals = { units: 0, agreement: 0, raised: 0, received: 0, receivable: 0 };
+    ranges.forEach(range => {
+      const stats = data[range];
+      if (!stats) return;
+      totals.units     += stats.units;
+      totals.agreement += stats.agreement / CR;
+      totals.raised    += stats.raised / CR;
+      totals.received  += stats.received / CR;
+      if (range !== 'Excess Collection') totals.receivable += stats.receivable / CR;
+      const cells = isOSDemand ? [
+        makeCell(range,                          normFont, whiteFill, leftAlign),
+        makeCell(stats.units,                    normFont, whiteFill, centerAlign),
+        makeCell(parseFloat((stats.agreement / CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+        makeCell(parseFloat((stats.raised    / CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+        makeCell(parseFloat((stats.received  / CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+        makeCell(parseFloat((stats.receivable/ CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+      ] : [
+        makeCell(range,                          normFont, whiteFill, leftAlign),
+        makeCell(stats.units,                    normFont, whiteFill, centerAlign),
+        makeCell(parseFloat((stats.agreement / CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+        makeCell(parseFloat((stats.received  / CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+        makeCell(parseFloat((stats.receivable/ CR).toFixed(2)),  normFont, whiteFill, rightAlign, "#,##0.00"),
+      ];
+      cells.forEach((cell, c) => { ws[encodeCell(rowIdx, c)] = cell; });
+      rowIdx++;
+    });
+    const totalCells = isOSDemand ? [
+      makeCell("Total",                                 boldFont, amberFill, leftAlign),
+      makeCell(totals.units,                            boldFont, amberFill, centerAlign),
+      makeCell(parseFloat(totals.agreement.toFixed(2)), boldFont, amberFill, rightAlign, "#,##0.00"),
+      makeCell(parseFloat(totals.raised.toFixed(2)),    boldFont, amberFill, rightAlign, "#,##0.00"),
+      makeCell(parseFloat(totals.received.toFixed(2)),  boldFont, amberFill, rightAlign, "#,##0.00"),
+      makeCell(parseFloat(totals.receivable.toFixed(2)),boldFont, amberFill, rightAlign, "#,##0.00"),
+    ] : [
+      makeCell("Total",                                 boldFont, amberFill, leftAlign),
+      makeCell(totals.units,                            boldFont, amberFill, centerAlign),
+      makeCell(parseFloat(totals.agreement.toFixed(2)), boldFont, amberFill, rightAlign, "#,##0.00"),
+      makeCell(parseFloat(totals.received.toFixed(2)),  boldFont, amberFill, rightAlign, "#,##0.00"),
+      makeCell(parseFloat(totals.receivable.toFixed(2)),boldFont, amberFill, rightAlign, "#,##0.00"),
+    ];
+    totalCells.forEach((cell, c) => { ws[encodeCell(rowIdx, c)] = cell; });
+    rowIdx++;
+    const colCount = isOSDemand ? 6 : 5;
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowIdx - 1, c: colCount - 1 } });
+    ws["!cols"] = isOSDemand
+      ? [{ wch: 20 }, { wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }]
+      : [{ wch: 20 }, { wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
+    ws["!rows"] = Array.from({ length: rowIdx }, () => ({ hpt: 18 }));
+    const sheetLabel = isOSDemand ? "OS Against Demand" : "OS Against Sale Value";
+    XLSX.utils.book_append_sheet(wb, ws, `${type} - ${sheetLabel}`);
+    XLSX.writeFile(wb, `${sheetLabel}_${type}_${monthYear || 'Export'}.xlsx`);
+  };
+
   const renderAgingSummaryTable = (type, summaryData, filterState, setFilterState) => {
     const data = summaryData[type];
     const isOSDemand = activeTab === 'O/S against Demand Value';
@@ -722,6 +904,10 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
         <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex items-center gap-3">
           {type === 'Residential' ? <Building2 className="text-blue-600" size={20} /> : <Store className="text-indigo-600" size={20} />}
           <h3 className="font-bold text-base text-gray-800 uppercase tracking-tight">{type} Analysis</h3>
+          <button onClick={() => downloadOSAgainstDemand(type, summaryData, isOSDemand)}
+            className="ml-auto px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xs flex items-center gap-2">
+            <Download size={13} /> Download
+          </button>
         </div>
         <table className="w-full text-left text-sm">
           <thead className="text-[10px] font-black uppercase text-gray-500 bg-gray-50 border-b border-gray-200">
@@ -763,7 +949,11 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
   const renderChangeDetail = (row) => {
     const val = row["Change Details"];
     if (!val) return <span className="text-gray-300 text-xs">-</span>;
-    const parts = val.split('|');
+    const parts = val.split('|').filter(p => {
+      const trimmed = p.trim();
+      // Skip the sub-parts of TRANSFER that are handled inside the TRANSFER block
+      return !trimmed.startsWith('Customer:') && !trimmed.startsWith('PrevOccupant:');
+    });
     return (
       <div className="flex flex-col gap-3 py-1 min-w-[260px]">
         {parts.map((part, idx) => {
@@ -783,15 +973,26 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
             </div>
           );
           if (label === "TRANSFER") {
-            const parts2 = cleanPart.split('|');
-            return (
-              <div key={idx} className="flex flex-col gap-1 border-l-2 border-blue-400 pl-3">
-                <span className="text-[10px] font-black text-blue-600 uppercase">Unit Transfer</span>
-                <span className="text-blue-600 text-xs font-bold">{parts2[0]?.trim()}</span>
-                {parts2[1] && <span className="text-gray-500 text-xs">Customer: {parts2[1].replace('Customer:', '').trim()}</span>}
-              </div>
-            );
-          }
+  // Parse directly from the full original val string using regex
+  // because the outer filter already stripped Customer: and PrevOccupant: segments
+  const fromUnit = val.match(/Unit\s+(\S+)\s*→\s*Unit/)?.[1];
+  const toUnit = val.match(/→\s*Unit\s+(\S+)/)?.[1];
+  const prevOccupant = val.match(/PrevOccupant:\s*([^|]+)/)?.[1]?.trim();
+  const currCustomer = String(row["Customer Name"] || '').trim();
+  return (
+    <div key={idx} className="flex flex-col gap-1 border-l-2 border-blue-400 pl-3">
+      <span className="text-[10px] font-black text-blue-600 uppercase">Unit Transfer</span>
+      {fromUnit && toUnit && fromUnit !== toUnit && (
+        <span className="text-gray-400 text-xs font-semibold">{fromUnit} → {toUnit}</span>
+      )}
+      <div className="flex items-center gap-1 text-xs">
+        <span className="line-through text-gray-400">{prevOccupant || 'Unsold'}</span>
+        <ArrowRight size={10} className="text-gray-400" />
+        <span className="text-blue-600 font-bold">{currCustomer}</span>
+      </div>
+    </div>
+  );
+}
           if (label === "ANOMALY") return (
             <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
               <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale</span>
@@ -840,7 +1041,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     );
   };
 
-  const renderTableHeaders = () => [...Object.keys(visibleColumns).filter(h => h !== "Change Details"), "Change Details"].map((h) => {
+  const renderTableHeaders = () => orderedColumns.map((h) => {
     const isAgingCol = agingColumns.includes(h);
     if (isAgingCol && activeTab !== 'Debtors Aging') return null;
     if (h === "Change Details" && activeTab === 'Debtors Aging') return null;
@@ -867,7 +1068,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
           {row.Status === 'EXISTING' ? 'UNCHANGED' : row.Status?.replace(/_/g, ' ') || 'MODIFIED'}
         </span>
       </td>
-      {[...Object.keys(visibleColumns).filter(k => k !== "Change Details"), "Change Details"].map((key) => {
+      {orderedColumns.map((key) => {
         const isAgingCol = agingColumns.includes(key);
         if (isAgingCol && activeTab !== 'Debtors Aging') return null;
         if (key === "Change Details" && activeTab === 'Debtors Aging') return null;
@@ -883,19 +1084,101 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
         if (!visibleColumns[key]) return null;
         const val = row[key];
         const isNumericCol = key.toLowerCase().includes('value') || key.toLowerCase().includes('received') ||
-          key.toLowerCase().includes('amount') || key.toLowerCase().includes('rate') ||
-          key.toLowerCase().includes('demand') || key.toLowerCase().includes('%') ||
-          key.toLowerCase().includes('outstanding') || isAgingCol;
-        return (
-          <td key={key} className={`p-4 font-medium whitespace-nowrap text-[13px] ${isAgingCol ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-700'}`}>
-            {key === "Change Details"
-              ? renderChangeDetail(row)
-              : isNumericCol
-                ? formatValue(val, key)
-                : formatMISDate(val, key)}
-          </td>
-        );
+  key.toLowerCase().includes('amount') || key.toLowerCase().includes('rate') ||
+  key.toLowerCase().includes('demand') || key.toLowerCase().includes('%') ||
+  key.toLowerCase().includes('outstanding') || isAgingCol ||
+  key === 'MSP_Rate' || key === 'MSP_Variance';
+
+if (key === 'MSP_Flag') {
+  return (
+    <td key={key} className="p-4 whitespace-nowrap">
+      {val === 'BELOW MSP' ? (
+        <span className="text-[9px] font-black px-2 py-1 rounded border bg-red-100 text-red-600 border-red-300 uppercase">Below MSP</span>
+      ) : val === 'AT/ABOVE MSP' ? (
+        <span className="text-[9px] font-black px-2 py-1 rounded border bg-emerald-100 text-emerald-600 border-emerald-300 uppercase">At/Above MSP</span>
+      ) : val === 'NO MSP' ? (
+        <span className="text-[9px] font-black px-2 py-1 rounded border bg-gray-100 text-gray-500 border-gray-300 uppercase">No MSP</span>
+      ) : <span className="text-gray-300 text-xs">-</span>}
+    </td>
+  );
+}
+
+if (key === 'MSP_Variance') {
+  const num = getNum(val);
+  return (
+    <td key={key} className={`p-4 font-bold whitespace-nowrap text-[13px] ${num < 0 ? 'text-rose-600' : num > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+      {val === 0 || val === undefined ? '-' : `${num < 0 ? '▼' : '▲'} ₹${formatValue(Math.abs(num))}`}
+    </td>
+  );
+}
+
+return (
+  <td key={key} className={`p-4 font-medium whitespace-nowrap text-[13px] ${isAgingCol ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-700'}`}>
+    {key === "Change Details"
+      ? renderChangeDetail(row)
+      : isNumericCol
+        ? formatValue(val, key)
+        : formatMISDate(val, key)}
+  </td>
+);
       })}
+      {activeTab === 'New Bookings' && (
+        <td className="p-4 min-w-[280px] align-top">
+          {isMaker && currentSubmissionStatus !== 'PENDING_REVIEW' && currentSubmissionStatus !== 'PENDING_MANAGER' && currentSubmissionStatus !== 'APPROVED' ? (
+            <div className="flex flex-col gap-2">
+              <textarea
+                placeholder="Add remark..."
+                value={rowRemarks[row["Unit No."]] || ""}
+                onChange={e => setRowRemarks(prev => ({ ...prev, [row["Unit No."]]: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs resize-none focus:outline-none focus:border-blue-400"
+                rows={2}
+              />
+              <label className="flex items-center gap-1 cursor-pointer text-xs text-blue-600 font-bold">
+                <Upload size={12} />
+                Attach Doc
+                <input type="file" className="hidden" onChange={e => { if (e.target.files[0]) handleAttachmentUpload(row["Unit No."], e.target.files[0]); }} />
+              </label>
+              {(rowAttachmentURLs[row["Unit No."]] || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline truncate max-w-[200px]">{att.name}</a>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {row.makerRemark && <p className="text-xs text-gray-700 italic">"{row.makerRemark}"</p>}
+              {(row.makerAttachments || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline">{att.name}</a>
+              ))}
+              {(isReviewer || isManager) && (
+                <label className="flex items-center gap-1 cursor-pointer text-xs text-purple-600 font-bold mt-1">
+                  <Upload size={12} />
+                  Add Doc
+                  <input type="file" className="hidden" onChange={async e => {
+                    if (!e.target.files[0]) return;
+                    const file = e.target.files[0];
+                    const uploadRef = ref(storage, `projects/${selectedProject.projectId}/reviewerAttachments/${row["Unit No."]}_${file.name}`);
+                    await uploadBytes(uploadRef, file);
+                    const url = await getDownloadURL(uploadRef);
+                    const docRef = doc(db, "projects", selectedProject.projectId, "misSubmissions", selectedSubmission.monthYear);
+                    const snap = await getDoc(docRef);
+                    if (snap.exists()) {
+                      const existing = snap.data().extractedData || [];
+                      const updated = existing.map(r => r["Unit No."] === row["Unit No."]
+                        ? { ...r, reviewerAttachments: [...(r.reviewerAttachments || []), { name: file.name, url }] }
+                        : r
+                      );
+                      await updateDoc(docRef, { extractedData: updated });
+                      setExtractedData(updated);
+                    }
+                  }} />
+                </label>
+              )}
+              {(row.reviewerAttachments || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline">{att.name}</a>
+              ))}
+            </div>
+          )}
+        </td>
+      )}
     </tr>
   ));
 
@@ -954,15 +1237,224 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
             </tbody>
           </table>
         </div>
-        <div className="p-5 border-t border-gray-200 bg-gray-50 flex justify-end">
-          <button onClick={() => setShowInventoryModal(false)} className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">Close Summary</button>
-        </div>
+        <div className="p-5 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+  <button onClick={() => {
+  const wb = XLSX.utils.book_new();
+  const ws = {};
+
+  // ── Color palette ──────────────────────────────────────────────
+  const navyFill   = { type: "pattern", pattern: "solid", fgColor: { rgb: "1F3864" } };
+  const amberFill  = { type: "pattern", pattern: "solid", fgColor: { rgb: "FFF2CC" } };
+  const whiteFill  = { type: "pattern", pattern: "solid", fgColor: { rgb: "FFFFFF" } };
+
+  const whiteFont  = { bold: true, color: { rgb: "FFFFFF" }, name: "Arial", sz: 9 };
+  const boldFont   = { bold: true, name: "Arial", sz: 9 };
+  const normFont   = { name: "Arial", sz: 9 };
+
+  const centerAlign = { horizontal: "center", vertical: "center", wrapText: true };
+  const rightAlign  = { horizontal: "right",  vertical: "center" };
+  const leftAlign   = { horizontal: "left",   vertical: "center" };
+
+  const thinBorder = {
+    top:    { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left:   { style: "thin", color: { rgb: "CCCCCC" } },
+    right:  { style: "thin", color: { rgb: "CCCCCC" } },
+  };
+
+  const makeCell = (v, font, fill, alignment, numFmt) => ({
+    v, t: typeof v === "number" ? "n" : "s",
+    s: { font, fill, alignment, border: thinBorder, ...(numFmt ? { numFmt } : {}) },
+  });
+
+  // ── Helper: format numbers ──────────────────────────────────────
+  const fmtCr  = (n) => n === 0 ? null : parseFloat(n.toFixed(2));
+  const fmtArea= (n) => n === 0 ? null : Math.round(n);
+  const fmtInt = (n) => n === 0 ? null : n;
+  const dash   = (v) => v == null ? makeCell("-", normFont, whiteFill, rightAlign) : null;
+
+  // ── Column definitions (15 data cols + merged headers) ──────────
+  // Row 1 — group headers (merged)
+  // Row 2 — sub-headers
+  // Row 3+ — data
+
+  const COL_WIDTHS = [14, 10, 16, 10, 14, 8, 10, 14, 16, 18, 10, 14, 16, 18, 16];
+
+  // Row 1: group header labels + spans
+  // Cols: A=Phase B=Tower C=UnitType  D=TotalUnits E=SaleableArea
+  //       F=MSP  (inside Unsold group — see row2)
+  //       G=UnitsSold H=AreaSold I=AssetValue J=AmtReceived  ← "As per MIS" group
+  //       K=UnsoldUnits L=UnsoldArea M=MSP                   ← "Unsold Inventory" group
+  //       N=RecFromUnsold O=RecFromSold P=TotalRec            ← "Receivable" group
+
+  // Actual column layout (0-indexed): 
+  // 0:Phase 1:Tower 2:UnitType 3:TotalUnits 4:SaleableArea
+  // 5:UnitsSold 6:AreaSold 7:AssetValue 8:AmtReceived      ← As per MIS (4 cols, merge from E to H → cols 5-8? no)
+  // Let me match image3 exactly:
+  // Phase | Tower | UnitType | TotalUnits | SaleableArea | UnitsSold | AreaSold | AssetValue | AmtReceived | UnsoldUnits | UnsoldArea | MSP | RecUnsold | RecSold | TotalRec
+
+  const COLS = 15; // A..O
+  const encodeCell = (r, c) => XLSX.utils.encode_cell({ r, c });
+
+  // ── Row 1: Top group headers ────────────────────────────────────
+  // A1:E1 = "Phase" / empty (no group label needed for first 5 cols)
+  // Actually image3 has row1 = Phase | TowerNo | UnitType | [Total Inventory span cols 4-5] | [As per MIS span] | [Unsold Inventory span] | [Receivable span]
+  // Let me re-read image3:
+  // Row1: Phase(merge r1:r2) | TowerNo(merge r1:r2) | UnitType(merge r1:r2) | Total Inventory(span 2) | As per MIS(span 4) | Unsold Inventory(span 3) | Receivable(span 3)
+  // Row2: (continued) | TotalUnits | SaleableArea | UnitsSold | AreaSold | AssetValue(Cr) | AmtReceived(Cr) | NoOfUnits | SaleableArea | MSP(INR) | RecUnsold(Cr) | RecSold(Cr) | TotalRec(Cr)
+  // That's 3+2+4+3+3 = 15 cols ✓
+
+  const r1headers = [
+    { label: "Phase",            col: 0, span: 1, mergeRow: true },
+    { label: "Tower No.",        col: 1, span: 1, mergeRow: true },
+    { label: "Unit Type",        col: 2, span: 1, mergeRow: true },
+    { label: "Total Inventory",  col: 3, span: 2, mergeRow: false },
+    { label: `As per ${monthYear || ''} MIS`, col: 5, span: 4, mergeRow: false },
+    { label: "Unsold Inventory", col: 9, span: 3, mergeRow: false },
+    { label: "Receivable",       col: 12, span: 3, mergeRow: false },
+  ];
+
+  const r2headers = [
+    "Phase", "Tower No.", "Unit Type",
+    "Total No. of Units", "Saleable Area",
+    "No. of Units Sold", "Area Sold", `Asset value in INR Cr.`, `Amount Received as on ${monthYear || ''} in INR Cr.`,
+    "No. of units", "Saleable Area", "MSP in INR",
+    `Receivable from Unsold in INR Cr.`, `Receivables from sold in INR Cr.`, `Total receivable in INR Cr.`
+  ];
+
+  // ── Write Row 0 (group headers) ─────────────────────────────────
+  r1headers.forEach(({ label, col, span, mergeRow }) => {
+    ws[encodeCell(0, col)] = makeCell(label, whiteFont, navyFill, centerAlign);
+    for (let c = col + 1; c < col + span; c++) {
+      ws[encodeCell(0, c)] = makeCell("", whiteFont, navyFill, centerAlign);
+    }
+    if (mergeRow) {
+      // merge row 0 and row 1 for this col
+    }
+  });
+
+  // ── Write Row 1 (sub-headers) ───────────────────────────────────
+  r2headers.forEach((label, c) => {
+    ws[encodeCell(1, c)] = makeCell(label, whiteFont, navyFill, centerAlign);
+  });
+
+  // ── Merges ──────────────────────────────────────────────────────
+  ws["!merges"] = [
+    // Row 0 group spans
+    { s: { r:0, c:3  }, e: { r:0, c:4  } }, // Total Inventory
+    { s: { r:0, c:5  }, e: { r:0, c:8  } }, // As per MIS
+    { s: { r:0, c:9  }, e: { r:0, c:11 } }, // Unsold Inventory
+    { s: { r:0, c:12 }, e: { r:0, c:14 } }, // Receivable
+    // Phase/Tower/UnitType merge rows 0+1
+    { s: { r:0, c:0 }, e: { r:1, c:0 } },
+    { s: { r:0, c:1 }, e: { r:1, c:1 } },
+    { s: { r:0, c:2 }, e: { r:1, c:2 } },
+  ];
+
+  // ── Data rows ───────────────────────────────────────────────────
+  // Group rows by section for Phase cell merging
+  const resRows  = inventorySummaryComputed.filter(r => !r.is_subtotal && !isCommercial(r.unit_type));
+  const comRows  = inventorySummaryComputed.filter(r => !r.is_subtotal &&  isCommercial(r.unit_type));
+  const resSub   = inventorySummaryComputed.find(r => r.is_subtotal && r.unit_type.includes("Residential"));
+  const comSub   = inventorySummaryComputed.find(r => r.is_subtotal && r.unit_type.includes("Commercial"));
+  const grandTot = inventorySummaryComputed.find(r => r.is_subtotal && r.unit_type.includes("Grand"));
+
+  let rowIdx = 2; // data starts at excel row 3 (0-indexed row 2)
+
+  const writeDataRow = (row, phaseLabel, isSubtotal) => {
+    const fill = isSubtotal ? amberFill : whiteFill;
+    const font   = isSubtotal ? boldFont  : normFont;
+
+    const totalUnits   = fmtInt(row.total_units);
+    const saleableArea = fmtArea(row.saleable_area);
+    const unitsSold    = fmtInt(row.units_sold);
+    const areaSold     = fmtArea(row.area_sold);
+    const assetVal     = fmtCr(row.asset_value_inr_cr);
+    const amtRec       = fmtCr(row.amount_received_oct25);
+    const unsoldUnits  = fmtInt(row.unsold_units);
+    const unsoldArea   = fmtArea(row.unsold_saleable_area);
+    const msp          = row.msp > 0 ? row.msp : null;
+    const recUnsold    = fmtCr(row.receivable_unsold_inr_cr);
+    const recSold      = fmtCr(row.receivable_sold_inr_cr);
+    const totalRec     = fmtCr(row.total_receivable_inr_cr);
+
+    const cells = [
+      makeCell(phaseLabel || "", font, fill, leftAlign),
+      makeCell(isSubtotal ? "" : (row.tower || ""), font, fill, centerAlign),
+      makeCell(isSubtotal ? row.unit_type : (row.unit_type || ""), font, fill, leftAlign),
+      totalUnits   != null ? makeCell(totalUnits,   font, fill, centerAlign) : makeCell("-", font, fill, centerAlign),
+      saleableArea != null ? makeCell(saleableArea, font, fill, rightAlign, "#,##0") : makeCell("-", font, fill, rightAlign),
+      unitsSold    != null ? makeCell(unitsSold,    font, fill, centerAlign) : makeCell("-", font, fill, centerAlign),
+      areaSold     != null ? makeCell(areaSold,     font, fill, rightAlign, "#,##0") : makeCell("-", font, fill, rightAlign),
+      assetVal     != null ? makeCell(assetVal,     font, fill, rightAlign, "#,##0.00") : makeCell("-", font, fill, rightAlign),
+      amtRec       != null ? makeCell(amtRec,       font, fill, rightAlign, "#,##0.00") : makeCell("-", font, fill, rightAlign),
+      unsoldUnits  != null ? makeCell(unsoldUnits,  font, fill, centerAlign) : makeCell("-", font, fill, centerAlign),
+      unsoldArea   != null ? makeCell(unsoldArea,   font, fill, rightAlign, "#,##0") : makeCell("-", font, fill, rightAlign),
+      msp          != null ? makeCell(msp,           font, fill, rightAlign, "#,##0") : makeCell("-", font, fill, rightAlign),
+      recUnsold    != null ? makeCell(recUnsold,     font, fill, rightAlign, "#,##0.00") : makeCell("-", font, fill, rightAlign),
+      recSold      != null ? makeCell(recSold,       font, fill, rightAlign, "#,##0.00") : makeCell("-", font, fill, rightAlign),
+      totalRec != null ? makeCell(totalRec, { ...font, bold: true, color: { rgb: "000000" } }, fill, rightAlign, "#,##0.00") : makeCell("-", { ...font, bold: true, color: { rgb: "000000" } }, fill, rightAlign),
+    ];
+
+    cells.forEach((cell, c) => { ws[encodeCell(rowIdx, c)] = cell; });
+    rowIdx++;
+    return rowIdx - 1; // return the row just written
+  };
+
+  // Residential data rows
+  const resStartRow = rowIdx;
+  resRows.forEach(row => writeDataRow(row, "", false));
+  const resEndRow = rowIdx - 1;
+  // Subtotal
+  if (resSub) writeDataRow(resSub, "Subtotal", true);
+
+  // Commercial data rows
+  const comStartRow = rowIdx;
+  comRows.forEach(row => writeDataRow(row, "", false));
+  const comEndRow = rowIdx - 1;
+  if (comSub) writeDataRow(comSub, "Subtotal", true);
+
+  // Grand Total
+  if (grandTot) writeDataRow({ ...grandTot, unit_type: "Total (Residential + Commercial)" }, "Total", true);
+
+  // ── Phase label merges (col A) ───────────────────────────────────
+  if (resRows.length > 0) {
+    ws[encodeCell(resStartRow, 0)] = makeCell("Residential", normFont, whiteFill, { ...centerAlign, horizontal: "left" });
+    if (resEndRow > resStartRow) {
+      ws["!merges"].push({ s: { r: resStartRow, c: 0 }, e: { r: resEndRow, c: 0 } });
+    }
+  }
+  if (comRows.length > 0) {
+    ws[encodeCell(comStartRow, 0)] = makeCell("Commercial", normFont, whiteFill, { ...centerAlign, horizontal: "left" });
+    if (comEndRow > comStartRow) {
+      ws["!merges"].push({ s: { r: comStartRow, c: 0 }, e: { r: comEndRow, c: 0 } });
+    }
+  }
+
+  // ── Sheet range & col widths ─────────────────────────────────────
+  ws["!ref"] = XLSX.utils.encode_range({ s: { r:0, c:0 }, e: { r: rowIdx - 1, c: 14 } });
+  ws["!cols"] = COL_WIDTHS.map(w => ({ wch: w }));
+  ws["!rows"] = Array.from({ length: rowIdx }, (_, i) => ({ hpt: i < 2 ? 36 : 18 }));
+
+  XLSX.utils.book_append_sheet(wb, ws, "Inventory Summary");
+  XLSX.writeFile(wb, `Inventory_Summary_${monthYear || 'Export'}.xlsx`);
+}}
+    className="px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-sm flex items-center gap-2 transition-colors">
+    <Download size={14} /> Download Summary
+    {isMaker && <span className="text-xs bg-amber-500 text-white px-2 py-0.5 rounded-full ml-1">PENDING</span>}
+  </button>
+  <button onClick={() => setShowInventoryModal(false)}
+    className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">
+    Close Summary
+  </button>
+</div>
       </div>
     </div>
   );
 
   // Sanity Gate
-  if (isMaker && !sanityPassed) {
+  const misSubmittedLocal = (() => { try { return JSON.parse(localStorage.getItem("misSubmitted")) || false; } catch { return false; } })();
+  if (isMaker && !sanityPassed && !misSubmittedLocal) {
     return (
       <Layout title="MIS Analysis">
         <div className="flex flex-col items-center justify-center h-[60vh] text-center">
@@ -1346,7 +1838,7 @@ const planned = bpTargets.planned_collection;
                           {q.quarter}
                           {isCurrentQ && <span className="ml-2 text-[9px] font-black bg-blue-600 text-white px-2 py-0.5 rounded">CURRENT</span>}
                         </td>
-                        <td className="px-6 py-3 text-right text-emerald-600 font-bold">₹{formatValue(getNum(q.saleProceedsPlanned) / 10000000)} Cr</td>
+                        <td className="px-6 py-3 text-right text-emerald-600 font-bold">₹{formatValue(getNum(q.expensesPlanned) / 10000000)} Cr</td>
                         <td className="px-6 py-3 text-right text-blue-600 font-bold">₹{formatValue(getNum(q.collectionsPlanned) / 10000000)} Cr</td>
                         <td className="px-6 py-3 text-right text-orange-500 font-bold">₹{formatValue(getNum(q.collectionsPlanned) / 3)}</td>
                         <td className="px-6 py-3 text-right text-gray-600">{formatValue(getNum(q.areaToSellPlanned))}</td>
@@ -1380,126 +1872,66 @@ const planned = bpTargets.planned_collection;
                   ⚠ {mspAnalysis.belowMSP.length} Below MSP
                 </span>
               </div>
-              {mspAnalysis.belowMSP.length > 0 ? (
-                <div className="overflow-auto" style={{ maxHeight: '600px' }}>
-                  <table className="w-full text-left border-collapse min-w-max">
-                    <thead className="sticky top-0 bg-red-50 z-10 border-b border-red-200">
-                      <tr>
-                        {["Unit No.", "Tower", "Unit Type", "Customer Name", "Agreement Value", "Rate/Sft (Actual)", "MSP Rate", "Variance", "Flag"].map(h => (
-                          <th key={h} className="p-3 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {mspAnalysis.belowMSP.map((row, idx) => (
-                        <tr key={idx} className="border-b border-gray-100 hover:bg-red-50/50 bg-red-50/20">
-                          <td className="p-3 text-[13px] font-bold text-gray-700">{row["Unit No."]}</td>
-                          <td className="p-3 text-[13px] text-gray-700">{row["Tower"]}</td>
-                          <td className="p-3 text-[13px] text-gray-700">{row["Unit Type"]}</td>
-                          <td className="p-3 text-[13px] text-gray-700">{row["Customer Name"]}</td>
-                          <td className="p-3 text-[13px] text-gray-700">₹{formatValue(row["Agreement value"])}</td>
-                          <td className="p-3 text-[13px] font-bold text-rose-500">₹{formatValue(row.ratePerSft)}</td>
-                          <td className="p-3 text-[13px] font-bold text-gray-700">₹{formatValue(row.msp)}</td>
-                          <td className="p-3 text-[13px] font-black text-rose-600">▼ ₹{formatValue(Math.abs(row.variance))}</td>
-                          <td className="p-3">
-                            <span className="text-[9px] font-black px-2 py-1 rounded border bg-red-100 text-red-600 border-red-300 uppercase">Below MSP</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-6 text-center text-emerald-600 font-bold text-sm">
-                  ✓ All new bookings are at or above MSP
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'Debtors Aging' && (
-        <div className="mb-6 p-6 rounded-2xl bg-white border border-gray-200 shadow-sm" ref={analysisTablesRef}>
-          <div className="flex items-center gap-2 mb-4 border-b border-gray-100 pb-3">
-            <PieChart className="text-blue-600" size={20} />
-            <span className="text-sm font-black text-gray-800 uppercase tracking-wider">Debtors Aging Breakdown</span>
-            <span className="ml-auto text-xl font-black text-rose-500">₹{formatValue(auditTotals.totalAgingAmt)}</span>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { key: 'upto30', label: 'Upto 30 Days', amt: auditTotals.agingUpto30Amt, units: auditTotals.agingUpto30Units, cls: 'bg-gray-50 border-gray-200', tcls: 'text-emerald-600' },
-              { key: 'aging3060', label: '30 - 60 Days', amt: auditTotals.aging3060Amt, units: auditTotals.aging3060Units, cls: 'bg-blue-50 border-blue-200', tcls: 'text-blue-600' },
-              { key: 'aging60plus', label: 'Greater than 60', amt: auditTotals.aging60PlusAmt, units: auditTotals.aging60PlusUnits, cls: 'bg-rose-50 border-rose-200', tcls: 'text-rose-500' },
-            ].map(({ key, label, amt, units, cls, tcls }) => (
-              <div key={key} onClick={() => setSelectedAgingBucket(selectedAgingBucket === key ? null : key)}
-                className={`p-4 rounded-xl border cursor-pointer hover:shadow-md transition-all ${cls} ${selectedAgingBucket === key ? 'ring-2 ring-blue-300' : ''}`}>
-                <span className={`text-[9px] font-black uppercase block mb-2 ${tcls}`}>{label}</span>
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-gray-500">Units:</span><span className="font-bold">{units}</span>
-                </div>
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-gray-500">Value:</span><span className={`font-black ${tcls}`}>₹{formatValue(amt)}</span>
-                </div>
-              </div>
+              {(() => {
+  const allMSPRows = [
+    ...mspAnalysis.belowMSP.map(r => ({ ...r, _flag: 'below' })),
+    ...mspAnalysis.atMSP.map(r => ({ ...r, _flag: 'at' })),
+    ...mspAnalysis.noMSP.map(r => ({ ...r, _flag: 'no' })),
+  ];
+  return allMSPRows.length > 0 ? (
+    <div className="overflow-auto" style={{ maxHeight: '600px' }}>
+      <table className="w-full text-left border-collapse min-w-max">
+        <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
+          <tr>
+            {["Unit No.", "Tower", "Unit Type", "Customer Name", "Agreement Value", "Rate/Sft (Actual)", "MSP Rate", "Variance", "Flag"].map(h => (
+              <th key={h} className="p-3 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{h}</th>
             ))}
-          </div>
-          {selectedAgingBucket && (
-            <div className="mt-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] font-black text-gray-600 uppercase tracking-widest">
-                  Showing: {selectedAgingBucket === 'upto30' ? 'Upto 30 Days' : selectedAgingBucket === 'aging3060' ? '30 - 60 Days' : 'Greater than 60 Days'}
-                </span>
-                <button onClick={() => setSelectedAgingBucket(null)} className="text-xs font-bold text-red-500 flex items-center gap-1">
-                  <X size={12} /> Clear
-                </button>
-              </div>
-              <div className="overflow-auto bg-white border border-gray-200 rounded-xl shadow-sm" style={{ maxHeight: '400px' }}>
-                <table className="w-full text-left border-collapse min-w-max">
-                  <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                    <tr>
-                      {["Status", "Unit No.", "Tower", "Booking Date", "Disbursement", "Unit Type", "Customer Name",
-                        "Saleable area in sft", "Agreement value", "Demand Raised as on Current Month excl. tax",
-                        "Amount Received excl. Tax Current Month", "Outstanding against demand",
-                        "30 - 60 days", "Greater than 60 days", "Total aging"].map(h => (
-                        <th key={h} className="p-3 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {processedData.filter(row => {
-                      const v3060 = getNum(row["30 - 60 days"]);
-                      const v60 = getNum(row["Greater than 60 days"]);
-                      const v30 = getNum(row["Upto 30 days"]);
-                      if (selectedAgingBucket === 'upto30') return v30 > 0;
-                      if (selectedAgingBucket === 'aging3060') return v3060 > 0;
-                      if (selectedAgingBucket === 'aging60plus') return v60 > 0;
-                      return false;
-                    }).map((row, idx) => (
-                      <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50/50">
-                        <td className="p-3">
-                          <span className={`text-[9px] font-black px-2 py-1 rounded border uppercase ${row.Status === 'EXISTING' ? 'text-gray-400 border-gray-200 bg-gray-50' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
-                            {row.Status === 'EXISTING' ? 'UNCHANGED' : 'MODIFIED'}
-                          </span>
-                        </td>
-                        {["Unit No.", "Tower", "Booking Date", "Disbursement", "Unit Type", "Customer Name",
-                          "Saleable area in sft", "Agreement value", "Demand Raised as on Current Month excl. tax",
-                          "Amount Received excl. Tax Current Month", "Outstanding against demand",
-                          "30 - 60 days", "Greater than 60 days", "Total aging"].map(key => (
-                          <td key={key} className="p-3 text-[13px] text-gray-700 whitespace-nowrap font-medium">
-                            {key.toLowerCase().includes('value') || key.toLowerCase().includes('received') ||
-                              key.toLowerCase().includes('amount') || key.toLowerCase().includes('demand') ||
-                              key.toLowerCase().includes('outstanding') || key.toLowerCase().includes('days') ||
-                              key.toLowerCase().includes('aging')
-                              ? `₹${formatValue(row[key])}`
-                              : formatMISDate(row[key], key) || row[key]}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          </tr>
+        </thead>
+        <tbody>
+          {allMSPRows.map((row, idx) => {
+            const isBelow = row._flag === 'below';
+            const isNo = row._flag === 'no';
+            return (
+              <tr key={idx} className={`border-b border-gray-100 transition-colors
+                ${isBelow ? 'bg-red-50/40 hover:bg-red-50/70' : 'hover:bg-gray-50'}`}>
+                <td className="p-3 text-[13px] font-bold text-gray-700">{row["Unit No."]}</td>
+                <td className="p-3 text-[13px] text-gray-700">{row["Tower"]}</td>
+                <td className="p-3 text-[13px] text-gray-700">{row["Unit Type"]}</td>
+                <td className="p-3 text-[13px] text-gray-700">{row["Customer Name"]}</td>
+                <td className="p-3 text-[13px] text-gray-700">₹{formatValue(row["Agreement value"])}</td>
+                <td className={`p-3 text-[13px] font-bold ${isBelow ? 'text-rose-500' : 'text-gray-700'}`}>
+                  ₹{formatValue(row.ratePerSft)}
+                </td>
+                <td className="p-3 text-[13px] font-bold text-gray-700">
+                  {isNo ? '-' : `₹${formatValue(row.msp)}`}
+                </td>
+                <td className={`p-3 text-[13px] font-black ${isBelow ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {isNo ? '-' : isBelow
+                    ? `▼ ₹${formatValue(Math.abs(row.variance))}`
+                    : `▲ ₹${formatValue(Math.abs(row.variance))}`}
+                </td>
+                <td className="p-3">
+                  {isBelow ? (
+                    <span className="text-[9px] font-black px-2 py-1 rounded border bg-red-100 text-red-600 border-red-300 uppercase">Below MSP</span>
+                  ) : isNo ? (
+                    <span className="text-[9px] font-black px-2 py-1 rounded border bg-gray-100 text-gray-500 border-gray-300 uppercase">No MSP</span>
+                  ) : (
+                    <span className="text-[9px] font-black px-2 py-1 rounded border bg-emerald-100 text-emerald-600 border-emerald-300 uppercase">At/Above MSP</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <div className="p-6 text-center text-gray-400 font-bold text-sm">
+      No new bookings found
+    </div>
+  );
+})()}
             </div>
           )}
         </div>
@@ -1555,6 +1987,99 @@ const planned = bpTargets.planned_collection;
           </div>
         </div>
 
+        {activeTab === 'Debtors Aging' && (
+          <div className="mb-6 p-6 rounded-2xl bg-white border border-gray-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-4 border-b border-gray-100 pb-3">
+              <PieChart className="text-blue-600" size={20} />
+              <span className="text-sm font-black text-gray-800 uppercase tracking-wider">Debtors Aging Breakdown</span>
+              <span className="ml-auto text-xl font-black text-rose-500">₹{formatValue(auditTotals.totalAgingAmt)}</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {[
+                { key: 'upto30', label: 'Upto 30 Days', amt: auditTotals.agingUpto30Amt, units: auditTotals.agingUpto30Units, cls: 'bg-gray-50 border-gray-200', tcls: 'text-emerald-600' },
+                { key: 'aging3060', label: '30 - 60 Days', amt: auditTotals.aging3060Amt, units: auditTotals.aging3060Units, cls: 'bg-blue-50 border-blue-200', tcls: 'text-blue-600' },
+                { key: 'aging6090', label: '60 - 90 Days', amt: auditTotals.aging6090Amt, units: auditTotals.aging6090Units, cls: 'bg-indigo-50 border-indigo-200', tcls: 'text-indigo-600' },
+                { key: 'aging90180', label: '90 - 180 Days', amt: auditTotals.aging90180Amt, units: auditTotals.aging90180Units, cls: 'bg-orange-50 border-orange-200', tcls: 'text-orange-600' },
+                { key: 'aging180365', label: '180 - 365 Days', amt: auditTotals.aging180365Amt, units: auditTotals.aging180365Units, cls: 'bg-amber-50 border-amber-200', tcls: 'text-amber-600' },
+                { key: 'aging365plus', label: 'Greater than 365 Days', amt: auditTotals.aging365PlusAmt, units: auditTotals.aging365PlusUnits, cls: 'bg-rose-50 border-rose-200', tcls: 'text-rose-500' },
+              ].map(({ key, label, amt, units, cls, tcls }) => (
+                <div key={key} onClick={() => setSelectedAgingBucket(selectedAgingBucket === key ? null : key)}
+                  className={`p-4 rounded-xl border cursor-pointer hover:shadow-md transition-all ${cls} ${selectedAgingBucket === key ? 'ring-2 ring-blue-300' : ''}`}>
+                  <span className={`text-[9px] font-black uppercase block mb-2 ${tcls}`}>{label}</span>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-500">Units:</span><span className="font-bold">{units}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-500">Value:</span><span className={`font-black ${tcls}`}>₹{formatValue(amt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {selectedAgingBucket && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[11px] font-black text-gray-600 uppercase tracking-widest">
+                    Showing: {selectedAgingBucket === 'upto30' ? 'Upto 30 Days' :
+                    selectedAgingBucket === 'aging3060' ? '30 - 60 Days' :
+                    selectedAgingBucket === 'aging6090' ? '60 - 90 Days' :
+                    selectedAgingBucket === 'aging90180' ? '90 - 180 Days' :
+                    selectedAgingBucket === 'aging180365' ? '180 - 365 Days' : 'Greater than 365 Days'}
+                  </span>
+                  <button onClick={() => setSelectedAgingBucket(null)} className="text-xs font-bold text-red-500 flex items-center gap-1">
+                    <X size={12} /> Clear
+                  </button>
+                </div>
+                <div className="overflow-auto bg-white border border-gray-200 rounded-xl shadow-sm" style={{ maxHeight: '400px' }}>
+                  <table className="w-full text-left border-collapse min-w-max">
+                    <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
+                      <tr>
+                        {["Status", "Unit No.", "Tower", "Booking Date", "Disbursement", "Unit Type", "Customer Name",
+                          "Saleable area in sft", "Agreement value", "Demand Raised as on Current Month excl. tax",
+                          "Amount Received excl. Tax Current Month", "Outstanding against demand",
+                          "30 - 60 days", "60 - 90 days", "90 - 180 days", "180 - 365 days", "Greater than 365 days", "Total aging"].map(h => (
+                          <th key={h} className="p-3 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {processedData.filter(row => {
+                        if (selectedAgingBucket === 'upto30') return getNum(row["Upto 30 days"]) > 0;
+                        if (selectedAgingBucket === 'aging3060') return getNum(row["30 - 60 days"]) > 0;
+                        if (selectedAgingBucket === 'aging6090') return getNum(row["60 - 90 days"]) > 0;
+                        if (selectedAgingBucket === 'aging90180') return getNum(row["90 - 180 days"]) > 0;
+                        if (selectedAgingBucket === 'aging180365') return getNum(row["180 - 365 days"]) > 0;
+                        if (selectedAgingBucket === 'aging365plus') return getNum(row["Greater than 365 days"]) > 0;
+                        return false;
+                      }).map((row, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50/50">
+                          <td className="p-3">
+                            <span className={`text-[9px] font-black px-2 py-1 rounded border uppercase ${row.Status === 'EXISTING' ? 'text-gray-400 border-gray-200 bg-gray-50' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                              {row.Status === 'EXISTING' ? 'UNCHANGED' : 'MODIFIED'}
+                            </span>
+                          </td>
+                          {["Unit No.", "Tower", "Booking Date", "Disbursement", "Unit Type", "Customer Name",
+                            "Saleable area in sft", "Agreement value", "Demand Raised as on Current Month excl. tax",
+                            "Amount Received excl. Tax Current Month", "Outstanding against demand",
+                            "30 - 60 days", "60 - 90 days", "90 - 180 days", "180 - 365 days", "Greater than 365 days", "Total aging"].map(key => (
+                            <td key={key} className="p-3 text-[13px] text-gray-700 whitespace-nowrap font-medium">
+                              {key.toLowerCase().includes('value') || key.toLowerCase().includes('received') ||
+                                key.toLowerCase().includes('amount') || key.toLowerCase().includes('demand') ||
+                                key.toLowerCase().includes('outstanding') || key.toLowerCase().includes('days') ||
+                                key.toLowerCase().includes('aging')
+                                ? `₹${formatValue(row[key])}`
+                                : formatMISDate(row[key], key) || row[key]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {!['O/S against Demand Value', 'O/S against Sale Value', 'Inventory Summary', 'Planned vs Actual', 'Debtors Aging', 'MSP Analysis'].includes(activeTab) && (
           <div className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
             <table className="w-full text-left border-collapse min-w-max">
@@ -1562,6 +2087,9 @@ const planned = bpTargets.planned_collection;
                 <tr>
                   <th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>
                   {renderTableHeaders()}
+                  {activeTab === 'New Bookings' && (
+                    <th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>
+                  )}
                 </tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
@@ -1573,7 +2101,7 @@ const planned = bpTargets.planned_collection;
           <div className="mt-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: '500px' }}>
             <table className="w-full text-left border-collapse min-w-max">
               <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}</tr>
+                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}</tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
             </table>
@@ -1583,7 +2111,7 @@ const planned = bpTargets.planned_collection;
           <div className="mt-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: '500px' }}>
             <table className="w-full text-left border-collapse min-w-max">
               <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}</tr>
+                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}</tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
             </table>
@@ -1671,6 +2199,39 @@ const planned = bpTargets.planned_collection;
             )}
           </div>
 
+          {/* Submission Status Tracking Card — shown when submitted */}
+          {(currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
+            <div className="mb-6">
+              <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3">Your MIS Submission — {monthYear}</p>
+              <div className={`bg-white border rounded-2xl p-5 shadow-sm ${currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' ? 'border-amber-300' : 'border-red-300'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-black text-gray-900 text-base">{monthYear}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Submitted by: {currentUser?.email} · {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                  </div>
+                  <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[currentSubmissionStatus]?.color}`}>
+                    {STATUS_CONFIG[currentSubmissionStatus]?.label}
+                  </span>
+                </div>
+                {currentSubmissionStatus === 'PENDING_REVIEW' && (
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                    <p className="text-xs font-bold text-amber-700">⏳ Waiting for Reviewer to review your submission.</p>
+                  </div>
+                )}
+                {currentSubmissionStatus === 'PENDING_MANAGER' && (
+                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                    <p className="text-xs font-bold text-blue-700">⏳ Reviewer approved. Waiting for Manager final approval.</p>
+                  </div>
+                )}
+                {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-upload and resubmit.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Upload */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
   {/* Previous Month — show frozen info OR upload box */}
@@ -1719,6 +2280,8 @@ const planned = bpTargets.planned_collection;
             </div>
           )}
 
+
+          
           <div className="flex justify-center mb-8">
             <button onClick={runComparison} disabled={(!files.prev && !frozenMISMetadata) || !files.curr || isProcessing || currentSubmissionStatus === 'APPROVED'}
   className={`flex items-center gap-3 px-10 py-3.5 rounded-xl font-bold text-sm transition-all
@@ -1729,10 +2292,8 @@ const planned = bpTargets.planned_collection;
               <ArrowRight size={18} />
             </button>
           </div>
-
           {hasData && (
             <>
-              {/* Submit for Review */}
               {currentSubmissionStatus !== 'APPROVED' && (
                 <div className="bg-white border border-blue-200 rounded-2xl p-5 shadow-sm mb-6">
                   <div className="flex items-center gap-2 mb-3">
@@ -1814,7 +2375,9 @@ const planned = bpTargets.planned_collection;
                         const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
                           'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
                           'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
-                        Object.keys(sub.extractedData[0]).forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+                        const allSubKeys = new Set();
+                        sub.extractedData.forEach(row => Object.keys(row).forEach(k => allSubKeys.add(k)));
+                        allSubKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
                         setVisibleColumns(cols);
                       }
                     }}

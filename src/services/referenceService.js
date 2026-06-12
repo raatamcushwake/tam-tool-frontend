@@ -3,15 +3,19 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "./firebase";
 import { auth } from "./firebase";
 
+const getStoragePath = async (projectId) => {
+  const snap = await getDoc(doc(db, "projects", projectId));
+  const name = snap.data()?.projectName || projectId;
+  return name.trim().replace(/\s+/g, '_');
+};
+
 // ── Upload Inventory Sheet ────────────────────────────────────
 export const uploadInventoryData = async (projectId, rows, file) => {
   try {
-    // Save raw file to Storage
-    const fileRef = ref(storage, `projects/${projectId}/reference/inventory_latest.xlsx`);
+    const storagePath = await getStoragePath(projectId);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/inventory_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
-
-    // Save parsed data to Firestore
     await setDoc(doc(db, "projects", projectId, "referenceData", "inventory"), {
       rows,
       fileUrl,
@@ -29,12 +33,10 @@ export const uploadInventoryData = async (projectId, rows, file) => {
 // ── Upload Business Plan Sheet ────────────────────────────────
 export const uploadBusinessPlanData = async (projectId, quarters, file) => {
   try {
-    // Save raw file to Storage
-    const fileRef = ref(storage, `projects/${projectId}/reference/businessplan_latest.xlsx`);
+    const storagePath = await getStoragePath(projectId);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/businessplan_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
-
-    // Save parsed data to Firestore
     await setDoc(doc(db, "projects", projectId, "referenceData", "businessPlan"), {
       quarters,
       fileUrl,
@@ -45,6 +47,27 @@ export const uploadBusinessPlanData = async (projectId, quarters, file) => {
     return { success: true };
   } catch (err) {
     console.error("uploadBusinessPlanData error:", err);
+    return { success: false, error: err.message };
+  }
+};
+
+// ── Upload MSP Data ───────────────────────────────────────────
+export const uploadMSPData = async (projectId, rates, file) => {
+  try {
+    const storagePath = await getStoragePath(projectId);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/msp_latest.xlsx`);
+    await uploadBytes(fileRef, file);
+    const fileUrl = await getDownloadURL(fileRef);
+    await setDoc(doc(db, "projects", projectId, "referenceData", "msp"), {
+      rates,
+      fileUrl,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: auth.currentUser?.uid || "unknown",
+      uploadedByEmail: auth.currentUser?.email || "unknown",
+    });
+    return { success: true };
+  } catch (err) {
+    console.error("uploadMSPData error:", err);
     return { success: false, error: err.message };
   }
 };
@@ -68,25 +91,6 @@ export const getBusinessPlanData = async (projectId) => {
   } catch (err) {
     console.error("getBusinessPlanData error:", err);
     return null;
-  }
-};
-// ── Upload MSP Data ───────────────────────────────────────────
-export const uploadMSPData = async (projectId, rates, file) => {
-  try {
-    const fileRef = ref(storage, `projects/${projectId}/reference/msp_latest.xlsx`);
-    await uploadBytes(fileRef, file);
-    const fileUrl = await getDownloadURL(fileRef);
-    await setDoc(doc(db, "projects", projectId, "referenceData", "msp"), {
-      rates,
-      fileUrl,
-      uploadedAt: new Date().toISOString(),
-      uploadedBy: auth.currentUser?.uid || "unknown",
-      uploadedByEmail: auth.currentUser?.email || "unknown",
-    });
-    return { success: true };
-  } catch (err) {
-    console.error("uploadMSPData error:", err);
-    return { success: false, error: err.message };
   }
 };
 

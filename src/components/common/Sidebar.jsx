@@ -1,8 +1,9 @@
+import { useState, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useProject } from "../../context/ProjectContext";
 import {
-  LayoutDashboard, FileSpreadsheet, BarChart3, DollarSign,
+  LayoutDashboard, FileSpreadsheet, BarChart3, IndianRupee,
   ShieldCheck, ClipboardList, FolderKanban, LogOut,
   ChevronLeft, ChevronRight, Users, Settings, Upload
 } from "lucide-react";
@@ -11,8 +12,8 @@ const navItems = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { path: "/mis-sanity", icon: FileSpreadsheet, label: "MIS Sanity Check" },
   { path: "/mis-analysis", icon: BarChart3, label: "MIS Analysis" },
-  { path: "/cost-analysis", icon: DollarSign, label: "Cost Analysis" },
-  { path: "/compliance", icon: ShieldCheck, label: "Compliance Progress" },
+  { path: "/cost-analysis", icon: IndianRupee, label: "Cost Analysis" },
+  { path: "/cs-tracker", icon: ShieldCheck, label: "CS Tracker" },
   { path: "/approvals", icon: ClipboardList, label: "Approval Tracker" },
   { path: "/projects", icon: FolderKanban, label: "Project Progress" },
 ];
@@ -22,8 +23,10 @@ const managerItems = [
 ];
 
 const adminItems = [
+  { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { path: "/admin", icon: Users, label: "User Management" },
   { path: "/admin/projects", icon: Settings, label: "Project Assignment" },
+  { path: "/admin/tracker", icon: ClipboardList, label: "Activity Tracker" },
 ];
 
 export default function Sidebar({ collapsed, setCollapsed }) {
@@ -36,12 +39,36 @@ const isManager = currentRole === "MANAGER";
 const isMaker = currentRole === "MAKER";
 
   // Safe localStorage read
-  let sanityPassed = false;
-  try {
-    sanityPassed = JSON.parse(localStorage.getItem("sanityPassed")) || false;
-  } catch {
-    sanityPassed = false;
-  }
+  // Reactive localStorage read — re-checks whenever storage changes
+  const [sanityPassed, setSanityPassed] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("sanityPassed")) || false;
+    } catch {
+      return false;
+    }
+  });
+
+  const [misSubmitted, setMisSubmitted] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("misSubmitted")) || false;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false);
+        setMisSubmitted(JSON.parse(localStorage.getItem("misSubmitted")) || false);
+      } catch {
+        setSanityPassed(false);
+        setMisSubmitted(false);
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   const handleLogout = async () => {
   localStorage.removeItem("sanityPassed");
@@ -82,16 +109,16 @@ const isMaker = currentRole === "MAKER";
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
 
         {/* Main Menu */}
-        {!collapsed && (
+        {!collapsed && !isAdmin && (
           <p className="text-slate-500 text-xs font-semibold uppercase px-2 mb-3">
             Main Menu
           </p>
         )}
 
         <ul className="space-y-1">
-          {navItems.map((item) => {
+          {!isAdmin && navItems.map((item) => {
             const isMisAnalysis = item.path === "/mis-analysis";
-            const isLocked = isMisAnalysis && isMaker && !sanityPassed && !isAdmin;
+            const isLocked = isMisAnalysis && isMaker && !sanityPassed && !misSubmitted && !isAdmin;
 
             return (
               <li key={item.path}>
@@ -110,12 +137,12 @@ const isMaker = currentRole === "MAKER";
                     to={item.path}
                     title={item.label}
                     className={({ isActive }) =>
-                      `flex items-center rounded-lg text-sm font-medium transition
-                      ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
-                      ${isActive
-                        ? "bg-blue-600 text-white shadow-lg"
-                        : "text-slate-400 hover:text-white hover:bg-slate-600"}`
-                    }
+  `flex items-center rounded-lg text-sm font-medium transition
+  ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
+  ${isActive
+    ? "bg-blue-600 text-white shadow-lg"
+    : "text-slate-400 hover:text-white hover:bg-slate-600"}`
+}
                   >
                     <item.icon size={18} />
                     {!collapsed && <span>{item.label}</span>}
@@ -127,7 +154,7 @@ const isMaker = currentRole === "MAKER";
         </ul>
 
         {/* Manager Menu */}
-        {isManager && (
+        {isManager && !isAdmin && (
           <>
             {!collapsed && (
               <p className="text-slate-500 text-xs font-semibold uppercase px-2 mt-6 mb-3">
@@ -140,9 +167,10 @@ const isMaker = currentRole === "MAKER";
               {managerItems.map((item) => (
                 <li key={item.path}>
                   <NavLink
-                    to={item.path}
-                    title={item.label}
-                    className={({ isActive }) =>
+                  to={item.path}
+                  end={item.path === "/admin"}
+                  title={item.label}
+                  className={({ isActive }) =>
                       `flex items-center rounded-lg text-sm font-medium transition
                       ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
                       ${isActive
@@ -174,6 +202,7 @@ const isMaker = currentRole === "MAKER";
                 <li key={item.path}>
                   <NavLink
                     to={item.path}
+                    end={item.path === "/admin"}
                     title={item.label}
                     className={({ isActive }) =>
                       `flex items-center rounded-lg text-sm font-medium transition

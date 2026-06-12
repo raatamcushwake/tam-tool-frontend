@@ -4,7 +4,7 @@ export const ROUTES = {
   MIS_SANITY: "/mis-sanity",
   MIS_ANALYSIS: "/mis-analysis",
   COST_ANALYSIS: "/cost-analysis",
-  COMPLIANCE: "/compliance",
+  CS_TRACKER: "/cs-tracker",
   APPROVAL_TRACKER: "/approvals",
   PROJECT_PROGRESS: "/projects",
 };

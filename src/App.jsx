@@ -10,12 +10,13 @@ import Dashboard from "./pages/Dashboard";
 import MISSanityCheck from "./pages/MISSanityCheck";
 import MISAnalysis from "./pages/MISAnalysis";
 import CostAnalysis from "./pages/CostAnalysis";
-import ComplianceProgress from "./pages/ComplianceProgress";
+import CSTracker from "./pages/CSTracker";
 import ApprovalTracker from "./pages/ApprovalTracker";
 import ProjectProgress from "./pages/ProjectProgress";
 import AdminPanel from "./pages/AdminPanel";
 import ProjectAssignment from "./pages/ProjectAssignment";
 import ReferenceUpload from "./pages/ReferenceUpload";
+import AdminTracker from "./pages/AdminTracker";
 
 // ─── Route Guards ────────────────────────────────────────────
 
@@ -93,8 +94,8 @@ function AppRoutes() {
       <Route path="/cost-analysis" element={
         <ActiveRoute><CostAnalysis /></ActiveRoute>
       } />
-      <Route path="/compliance" element={
-        <ActiveRoute><ComplianceProgress /></ActiveRoute>
+      <Route path="/cs-tracker" element={
+        <ActiveRoute><CSTracker /></ActiveRoute>
       } />
       <Route path="/approvals" element={
         <ActiveRoute><ApprovalTracker /></ActiveRoute>
@@ -109,6 +110,9 @@ function AppRoutes() {
       } />
       <Route path="/admin/projects" element={
         <AdminRoute><ProjectAssignment /></AdminRoute>
+      } />
+      <Route path="/admin/tracker" element={
+        <AdminRoute><AdminTracker /></AdminRoute>
       } />
       <Route path="/reference-upload" element={
         <ActiveRoute><ReferenceUpload /></ActiveRoute>

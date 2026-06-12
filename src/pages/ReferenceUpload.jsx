@@ -14,6 +14,10 @@ import {
   getBusinessPlanData,
   getMSPData,
 } from "../services/referenceService";
+import {
+  uploadCostBPFile,
+  getCostBPMetadata,
+} from "../services/CostAnalysisService";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
   const inputRef = useRef(null);
@@ -76,12 +80,17 @@ export default function ReferenceUpload() {
   const [existingInventory, setExistingInventory] = useState(null);
   const [existingPlan, setExistingPlan] = useState(null);
   const [existingMsp, setExistingMsp] = useState(null);
+  const [costBpFile, setCostBpFile] = useState(null);
+  const [uploadingCostBp, setUploadingCostBp] = useState(false);
+  const [costBpStatus, setCostBpStatus] = useState(null);
+  const [existingCostBp, setExistingCostBp] = useState(null);
 
   useEffect(() => {
     if (!projectId) return;
     getInventoryData(projectId).then(setExistingInventory);
     getBusinessPlanData(projectId).then(setExistingPlan);
     getMSPData(projectId).then(setExistingMsp);
+    getCostBPMetadata(projectId).then(setExistingCostBp);
   }, [projectId]);
 
   // ── Parse Inventory Sheet ─────────────────────────────────
@@ -142,7 +151,7 @@ export default function ReferenceUpload() {
         let rateRowIdx = -1;      // Row with "Rate (Per Sq. ft."
 
         for (let i = 0; i < raw.length; i++) {
-          // Search across ALL columns in the row for the label
+          const colA = String(raw[i][0] ?? "").trim().toLowerCase();
           const rowText = raw[i]
             .map(v => String(v ?? "").trim().toLowerCase())
             .join(" | ");
@@ -150,9 +159,9 @@ export default function ReferenceUpload() {
           if (fyRowIdx === -1 && rowText.includes("financial year")) fyRowIdx = i;
           if (quarterRowIdx === -1 && raw[i].some(v => String(v ?? "").trim().toUpperCase() === "Q1" || String(v ?? "").trim().toUpperCase() === "Q2")) quarterRowIdx = i;
           if (periodRowIdx === -1 && rowText.match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i) && rowText.match(/\d{4}/) && i !== fyRowIdx) periodRowIdx = i;
-          if (areaRowIdx === -1 && rowText.includes("area") && rowText.includes("sold")) areaRowIdx = i;
-          if (collectionsRowIdx === -1 && rowText.includes("new sales collection")) collectionsRowIdx = i;
-          if (saleProceedsRowIdx === -1 && rowText.includes("total revenue")) saleProceedsRowIdx = i;
+          if (collectionsRowIdx === -1 && colA.includes("projected collection")) collectionsRowIdx = i;
+          if (saleProceedsRowIdx === -1 && colA.includes("projected expenses")) saleProceedsRowIdx = i;
+          if (areaRowIdx === -1 && colA.includes("projected area")) areaRowIdx = i;
           if (rateRowIdx === -1 && rowText.includes("rate") && rowText.includes("sq") && rowText.includes("ft")) rateRowIdx = i;
         }
 
@@ -211,8 +220,8 @@ quarters.push({
   quarter,
   monthRange,
   col,
-  saleProceedsPlanned: getVal(saleProceedsRowIdx, col),
-  collectionsPlanned: getVal(collectionsRowIdx, col),  // stored as raw rupees
+  expensesPlanned: getVal(saleProceedsRowIdx, col),
+  collectionsPlanned: getVal(collectionsRowIdx, col),
   areaToSellPlanned: getVal(areaRowIdx, col),
   ratePerSft: getVal(rateRowIdx, col),
 });
@@ -282,8 +291,14 @@ quarters.push({
           const mspRate  = typeof row[mspIdx] === "number"
             ? row[mspIdx]
             : Number(String(row[mspIdx] || "").replace(/,/g, "")) || 0;
-          if (!unitNo) continue;
-          if (mspRate <= 0) continue;
+          if (!unitNo) {
+            console.warn(`ROW ${i} SKIPPED — unitNo is empty. Raw row:`, row);
+            continue;
+          }
+          if (mspRate <= 0) {
+            console.warn(`ROW ${i} SKIPPED — mspRate is 0 or negative. unitNo: "${unitNo}", raw msp value:`, row[mspIdx]);
+            continue;
+          }
           rates.push({ unitNo, tower, unitType, mspRate });
         }
 
@@ -338,7 +353,26 @@ quarters.push({
     setUploadingPlan(false);
   };
 
-  const handleMSPUpload = async () => {
+  const handleCostBPUpload = async () => {
+  if (!costBpFile || !projectId) return;
+  setUploadingCostBp(true);
+  setCostBpStatus(null);
+  try {
+    const result = await uploadCostBPFile(projectId, costBpFile);
+    if (result.success) {
+      setCostBpStatus({ type: "success", message: "Cost Budget uploaded successfully!" });
+      setCostBpFile(null);
+      getCostBPMetadata(projectId).then(setExistingCostBp);
+    } else {
+      setCostBpStatus({ type: "error", message: result.error });
+    }
+  } catch (err) {
+    setCostBpStatus({ type: "error", message: err.message });
+  }
+  setUploadingCostBp(false);
+};
+
+const handleMSPUpload = async () => {
     if (!mspFile || !projectId) return;
     setUploadingMsp(true);
     setMspStatus(null);
@@ -367,7 +401,7 @@ quarters.push({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
 
         {/* ── Inventory Sheet ── */}
         <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
@@ -532,7 +566,54 @@ quarters.push({
           </button>
         </div>
 
+      {/* ── Cost Budget (BP) Sheet ── */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-100">
+            <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+              <FileSpreadsheet size={20} className="text-indigo-600" />
+            </div>
+            <div>
+              <h4 className="font-bold text-gray-800 text-sm">Cost Budget (BP) Sheet</h4>
+              <p className="text-gray-400 text-xs">Quarter-wise cost outflow budget</p>
+            </div>
+          </div>
+
+          {existingCostBp && (
+            <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center justify-between">
+              <div>
+                <p className="text-indigo-700 text-xs font-bold">Last Uploaded</p>
+                <p className="text-indigo-500 text-xs">{new Date(existingCostBp.uploadedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                <p className="text-indigo-400 text-xs">{existingCostBp.fileName}</p>
+              </div>
+            </div>
+          )}
+
+          <FileUploadBox
+            label="Upload Cost Budget Sheet"
+            subtitle="Cost BP Excel file (.xlsx)"
+            file={costBpFile}
+            onFileSelect={setCostBpFile}
+            onClear={() => setCostBpFile(null)}
+            accent="blue"
+          />
+
+          {costBpStatus && (
+            <div className={`mt-3 p-3 rounded-xl text-xs font-medium flex items-center gap-2
+              ${costBpStatus.type === "success" ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+              {costBpStatus.type === "success" ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+              {costBpStatus.message}
+            </div>
+          )}
+
+          <button onClick={handleCostBPUpload} disabled={!costBpFile || uploadingCostBp}
+            className={`mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all
+              ${costBpFile && !uploadingCostBp ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}>
+            {uploadingCostBp ? <><RefreshCw size={14} className="animate-spin" /> Uploading...</> : <><Upload size={14} /> Upload Cost Budget Sheet</>}
+          </button>
+        </div>
+
       </div>
+
     </Layout>
   );
 }
