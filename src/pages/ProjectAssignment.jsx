@@ -29,8 +29,8 @@ export default function ProjectAssignment() {
   const fetchData = async () => {
     try {
       const [usersRes, projectsRes] = await Promise.all([
-        axios.get(`http://127.0.0.1:8000/api/auth/users`),
-        axios.get(`http://127.0.0.1:8000/api/projects`),
+        axios.get(`${import.meta.env.VITE_API_URL}/api/auth/users`),
+        axios.get(`${import.meta.env.VITE_API_URL}/api/projects`),
       ]);
       setUsers(usersRes.data.filter(u => !u.isAdmin));
       setProjects(projectsRes.data);
@@ -48,7 +48,7 @@ export default function ProjectAssignment() {
     if (!newProjectName.trim()) return;
     setCreatingProject(true);
     try {
-      await axios.post(`http://127.0.0.1:8000/api/projects`, {
+      await axios.post(`${import.meta.env.VITE_API_URL}/api/projects`, {
         name: newProjectName.trim(),
       });
       setNewProjectName("");
@@ -67,7 +67,7 @@ export default function ProjectAssignment() {
     try {
       const project = projects.find(p => p.id === selectedProject);
       await axios.post(
-        `http://127.0.0.1:8000/api/auth/user/${selectedUser}/assign-project`,
+        `${import.meta.env.VITE_API_URL}/api/auth/user/${selectedUser}/assign-project`,
         {
           projectId: selectedProject,
           projectName: project?.name || selectedProject,
@@ -87,7 +87,7 @@ export default function ProjectAssignment() {
   const removeRole = async (uid, projectId, role) => {
     try {
       await axios.delete(
-        `http://127.0.0.1:8000/api/auth/user/${uid}/remove-project`,
+        `${import.meta.env.VITE_API_URL}/api/auth/user/${uid}/remove-project`,
         { data: { projectId, role } }
       );
       await fetchData();
