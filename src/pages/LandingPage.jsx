@@ -57,13 +57,7 @@ const projectRoles = userProfile?.projectRoles || [];
       {/* Navbar */}
       <nav className="bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-md">
-            <span className="text-white font-black text-xl">T</span>
-          </div>
-          <div>
-            <p className="text-gray-900 font-bold text-base leading-tight">TAM Tool</p>
-            <p className="text-gray-400 text-[11px]">Cushman & Wakefield Pvt. Ltd.</p>
-          </div>
+          <img src="/cw-logo.png" alt="Cushman & Wakefield" className="h-10 object-contain" />
         </div>
         <div className="flex items-center gap-4">
           {userProfile?.name && (
@@ -224,16 +218,47 @@ const projectRoles = userProfile?.projectRoles || [];
         </div>
       </div>
 
-      {/* Footer */}
-      <footer className="bg-gray-50 border-t border-gray-200 px-8 py-6">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xs">T</span>
+      {/* About Section */}
+      <div className="bg-slate-900 px-8 py-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-start">
+            <div>
+              <h3 className="text-white font-black text-2xl mb-4">About Cushman & Wakefield India</h3>
+              <p className="text-slate-400 text-sm leading-relaxed mb-4">
+                Cushman & Wakefield India stands as a premier international property consultant, delivering exceptional value through specialized Valuation & Advisory (V&A) services. With over 20 years of cumulative expertise, our dedicated team of 175+ professionals offers a broad spectrum of solutions, including Real Estate Asset Advisory (RAA) across all asset classes — from office and residential to data centers and infrastructure — and comprehensive Technical Assessment & Monitoring (TAM).
+              </p>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                Our approach is built on deep property understanding, backed by robust market knowledge and local insights. We provide clients — including PE funds, banks, developers, and corporates — with data-driven insights for financing, financial reporting, M&A, strategic planning, and risk mitigation.
+              </p>
             </div>
-            <span className="text-gray-600 text-sm font-semibold">TAM Tool</span>
+            <div>
+              <h4 className="text-white font-black text-lg mb-4">AI-Powered Project Management</h4>
+              <p className="text-slate-400 text-sm leading-relaxed mb-6">
+                Our AI-powered TAM Tool revolutionizes construction project management by enabling real-time MIS tracking, automated compliance monitoring, and intelligent analysis — helping clients make informed, impactful decisions faster than ever before.
+              </p>
+              <p className="text-slate-300 text-sm leading-relaxed italic mb-6">
+                "Transforming real estate through innovative AI-powered solutions and exceptional service delivery."
+              </p>
+              <div className="flex gap-6">
+                <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex-1 text-center">
+                  <p className="text-blue-400 font-black text-3xl">20+</p>
+                  <p className="text-slate-400 text-xs mt-2 font-medium">Years of Expertise</p>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex-1 text-center">
+                  <p className="text-blue-400 font-black text-3xl">175+</p>
+                  <p className="text-slate-400 text-xs mt-2 font-medium">Professionals</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <p className="text-gray-400 text-xs">© 2026 Cushman & Wakefield Pvt. Ltd. All rights reserved.</p>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="bg-slate-950 border-t border-slate-800 px-8 py-5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <img src="/cw-logo.png" alt="Cushman & Wakefield" className="h-7 object-contain" />
+          <p className="text-slate-500 text-xs">© 2026 Cushman & Wakefield Pvt. Ltd. All rights reserved.</p>
         </div>
       </footer>
 
