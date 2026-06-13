@@ -693,6 +693,8 @@ const enrichedWithRemarks = extractedData.map(row => ({
   makerAttachments: rowAttachmentURLs[row["Unit No."]] || [],
 }));
 
+const sanityPassed = (() => { try { return JSON.parse(localStorage.getItem("sanityPassed")); } catch { return null; } })();
+
 const result = await submitMISForReview(selectedProject.projectId, monthYear, {
   extractedData: enrichedWithRemarks,
   unitStats,
@@ -700,6 +702,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
   submittedBy: currentUser.email,
   monthYear,
   currFileURL,
+  sanityCheckPassed: sanityPassed,
 });
     if (result.success) {
       setCurrentSubmissionStatus('PENDING_REVIEW');
@@ -2398,6 +2401,15 @@ const planned = bpTargets.planned_collection;
                         {sub.rejectionComment && (
                           <p className="text-xs text-red-500 mt-1 italic">❌ Rejected: "{sub.rejectionComment}"</p>
                         )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-[10px] font-black text-gray-400 uppercase">Sanity Check:</span>
+                          {sub.sanityCheckPassed === true
+                            ? <span className="text-[10px] font-black px-2 py-1 rounded bg-emerald-100 text-emerald-700 border border-emerald-300">✓ Passed</span>
+                            : sub.sanityCheckPassed === false
+                            ? <span className="text-[10px] font-black px-2 py-1 rounded bg-red-100 text-red-700 border border-red-300">⚠ Failed</span>
+                            : <span className="text-[10px] font-black px-2 py-1 rounded bg-gray-100 text-gray-500 border border-gray-300">Not Run</span>
+                          }
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[sub.status]?.color}`}>
