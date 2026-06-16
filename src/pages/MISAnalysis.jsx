@@ -191,15 +191,31 @@ useEffect(() => {
 
   // Check current month submission status for Maker
   useEffect(() => {
-    const projectId = selectedProject?.projectId;
-    if (!projectId || !monthYear || !isMaker) return;
-    import("../services/misSubmissionService").then(({ getMISSubmission }) => {
-      getMISSubmission(projectId, monthYear).then(data => {
-        if (data) setCurrentSubmissionStatus(data.status);
-        else setCurrentSubmissionStatus(null);
-      });
+  const projectId = selectedProject?.projectId;
+  if (!projectId || !monthYear || !isMaker) return;
+  import("../services/misSubmissionService").then(({ getMISSubmission }) => {
+    getMISSubmission(projectId, monthYear).then(data => {
+      if (data) {
+        setCurrentSubmissionStatus(data.status);
+        // Load submitted data so Maker can see their analysis while pending
+        if (data.extractedData?.length > 0 && extractedData.length === 0) {
+          setExtractedData(data.extractedData);
+          setUnitStats(data.unitStats || { total: 0, sold: 0, unsold: 0 });
+          const cols = {};
+          const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
+            'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
+            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+          const allKeys = new Set();
+          data.extractedData.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+          allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+          setVisibleColumns(cols);
+        }
+      } else {
+        setCurrentSubmissionStatus(null);
+      }
     });
-  }, [selectedProject, monthYear, isMaker]);
+  });
+}, [selectedProject, monthYear, isMaker]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
