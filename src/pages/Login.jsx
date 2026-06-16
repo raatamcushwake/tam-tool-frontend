@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
@@ -8,18 +8,9 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [userSuggestions, setUserSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const { login, fetchUserProfile } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-    fetch(`${apiUrl}/api/auth/users`)
-      .then(res => res.json())
-      .then(data => setUserSuggestions(data.map(u => u.email).filter(Boolean)))
-      .catch(() => {});
-  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -35,10 +26,6 @@ export default function Login() {
     }
     setLoading(false);
   };
-
-  const filteredSuggestions = userSuggestions.filter(e =>
-    e.toLowerCase().includes(email.toLowerCase())
-  );
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -73,27 +60,12 @@ export default function Login() {
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) => { setEmail(e.target.value); setShowSuggestions(true); }}
-                  onFocus={() => { if (email.length > 0) setShowSuggestions(true); }}
-                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
                   required
                   autoComplete="off"
                   className="w-full border border-gray-200 text-gray-800 placeholder-gray-400 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition text-sm bg-gray-50"
                 />
-                {showSuggestions && filteredSuggestions.length > 0 && email.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-50 mt-1 max-h-48 overflow-y-auto">
-                    {filteredSuggestions.map((suggestion, idx) => (
-                      <div
-                        key={idx}
-                        onMouseDown={() => { setEmail(suggestion); setShowSuggestions(false); }}
-                        className="px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0"
-                      >
-                        {suggestion}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
 
