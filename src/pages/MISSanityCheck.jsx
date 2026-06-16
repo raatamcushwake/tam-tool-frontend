@@ -987,6 +987,44 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
             </div>
           )}
 
+          {/* Submission Status Tracking Card — shown after submission */}
+          {(currentSubmissionStatus === 'PENDING_REVIEW' || 
+            currentSubmissionStatus === 'PENDING_MANAGER' || 
+            currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || 
+            currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
+            <div className="mb-6">
+              <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3">Your Sanity Submission — {monthYear}</p>
+              <div className={`bg-white border rounded-2xl p-5 shadow-sm ${
+                currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' 
+                  ? 'border-amber-300' : 'border-red-300'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-black text-gray-900 text-base">{monthYear}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Submitted by: {currentUser?.email}</p>
+                  </div>
+                  <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[currentSubmissionStatus]?.color}`}>
+                    {STATUS_CONFIG[currentSubmissionStatus]?.label}
+                  </span>
+                </div>
+                {currentSubmissionStatus === 'PENDING_REVIEW' && (
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                    <p className="text-xs font-bold text-amber-700">⏳ Waiting for Reviewer to review your sanity submission.</p>
+                  </div>
+                )}
+                {currentSubmissionStatus === 'PENDING_MANAGER' && (
+                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                    <p className="text-xs font-bold text-blue-700">⏳ Reviewer approved. Waiting for Manager final approval.</p>
+                  </div>
+                )}
+                {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-run sanity and resubmit.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Run Button */}
           <div className="flex justify-center mb-8">
             <button
