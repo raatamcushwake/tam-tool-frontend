@@ -74,14 +74,14 @@ export default function Login() {
                   type="email"
                   value={email}
                   onChange={(e) => { setEmail(e.target.value); setShowSuggestions(true); }}
-                  onFocus={() => setShowSuggestions(true)}
+                  onFocus={() => { if (email.length > 0) setShowSuggestions(true); }}
                   onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                   placeholder="you@company.com"
                   required
                   autoComplete="off"
                   className="w-full border border-gray-200 text-gray-800 placeholder-gray-400 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition text-sm bg-gray-50"
                 />
-                {showSuggestions && filteredSuggestions.length > 0 && (
+                {showSuggestions && filteredSuggestions.length > 0 && email.length > 0 && (
                   <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-50 mt-1 max-h-48 overflow-y-auto">
                     {filteredSuggestions.map((suggestion, idx) => (
                       <div
