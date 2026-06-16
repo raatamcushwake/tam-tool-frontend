@@ -12,9 +12,16 @@ export const COST_STATUS_CONFIG = {
 };
 
 // ── Upload Cost BP File (Manager) ─────────────────────────────
-export const uploadCostBPFile = async (projectId, file) => {
+const getStoragePath = async (projectId) => {
+  const snap = await getDoc(doc(db, "projects", projectId));
+  const name = snap.data()?.projectName || snap.data()?.name || projectId;
+  return name.trim().replace(/\s+/g, '_');
+};
+
+export const uploadCostBPFile = async (projectId, file, projectName) => {
   try {
-    const fileRef = ref(storage, `projects/${projectId}/costReference/businessPlan_latest.xlsx`);
+    const storagePath = projectName || await getStoragePath(projectId);
+    const fileRef = ref(storage, `projects/${storagePath}/costReference/businessPlan_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
 
