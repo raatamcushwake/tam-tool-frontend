@@ -92,6 +92,60 @@ export const getNotificationsForRole = async (projectId, role) => {
             type: "approved",
           });
         }
+
+        // ADMIN sees: everything — any status change across all projects
+        if (role === "ADMIN") {
+          if (data.status === "PENDING_REVIEW") {
+            notifications.push({
+              id: `${module.collection}-${d.id}-admin-pending_review`,
+              module: module.label,
+              period,
+              message: `${submittedBy} submitted ${module.label} (${period}) — awaiting reviewer`,
+              time: getTime("submittedAt"),
+              type: "action_needed",
+            });
+          }
+          if (data.status === "PENDING_MANAGER") {
+            notifications.push({
+              id: `${module.collection}-${d.id}-admin-pending_manager`,
+              module: module.label,
+              period,
+              message: `${reviewedBy} reviewed ${module.label} (${period}) — awaiting manager`,
+              time: getTime("reviewedAt"),
+              type: "action_needed",
+            });
+          }
+          if (data.status === "REJECTED_BY_REVIEWER") {
+            notifications.push({
+              id: `${module.collection}-${d.id}-admin-rejected_reviewer`,
+              module: module.label,
+              period,
+              message: `${reviewedBy} rejected ${module.label} (${period}) by ${submittedBy}`,
+              time: getTime("reviewedAt"),
+              type: "rejected",
+            });
+          }
+          if (data.status === "REJECTED_BY_MANAGER") {
+            notifications.push({
+              id: `${module.collection}-${d.id}-admin-rejected_manager`,
+              module: module.label,
+              period,
+              message: `Manager rejected ${module.label} (${period}) by ${submittedBy}`,
+              time: getTime("approvedAt"),
+              type: "rejected",
+            });
+          }
+          if (data.status === "APPROVED") {
+            notifications.push({
+              id: `${module.collection}-${d.id}-admin-approved`,
+              module: module.label,
+              period,
+              message: `${module.label} (${period}) by ${submittedBy} fully approved`,
+              time: getTime("approvedAt"),
+              type: "approved",
+            });
+          }
+        }
       });
     } catch (err) {
       console.error(`Notification fetch failed for ${module.label}:`, err);
