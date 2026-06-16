@@ -51,9 +51,35 @@ export default function Navbar({ title = "Dashboard" }) {
 
   // Fetch notifications when project changes
   useEffect(() => {
+    // ADMIN: fetch all projects and collect notifications from each
+    if (isAdmin) {
+      setLoading(true);
+      const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+      fetch(`${apiUrl}/api/projects`)
+        .then(r => r.json())
+        .then(async (projects) => {
+          const all = [];
+          for (const project of projects) {
+            const projectId = project.projectId || project.id;
+            const notifs = await getNotificationsForRole(projectId, "ADMIN");
+            // Tag each notification with project name
+            notifs.forEach(n => {
+              n.projectName = project.name || project.projectName || projectId;
+            });
+            all.push(...notifs);
+          }
+          // Sort newest first
+          all.sort((a, b) => (b.time || 0) - (a.time || 0));
+          setNotifications(all);
+        })
+        .finally(() => setLoading(false));
+      return;
+    }
+
+    // Non-admin: fetch for selected project only
     const projectId = selectedProject?.projectId;
     const role = selectedProject?.role;
-    if (!projectId || !role || isAdmin) return;
+    if (!projectId || !role) return;
 
     setLoading(true);
     getNotificationsForRole(projectId, role)
@@ -158,7 +184,7 @@ export default function Navbar({ title = "Dashboard" }) {
                 <div>
                   <h3 className="font-black text-gray-800 text-sm">Notifications</h3>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {selectedProject?.role} · {selectedProject?.projectName || ""}
+                    {isAdmin ? "ADMIN · All Projects" : `${selectedProject?.role} · ${selectedProject?.projectName || ""}`}
                   </p>
                 </div>
                 {unreadCount > 0 && (
@@ -196,10 +222,15 @@ export default function Navbar({ title = "Dashboard" }) {
                       >
                         {getIcon(n.type)}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${MODULE_COLORS[n.module] || "bg-gray-100 text-gray-600"}`}>
                               {n.module}
                             </span>
+                            {isAdmin && n.projectName && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                                {n.projectName}
+                              </span>
+                            )}
                             <span className="text-[10px] text-gray-400">{n.period}</span>
                           </div>
                           <p className="text-xs text-gray-700 font-medium leading-relaxed">{n.message}</p>
