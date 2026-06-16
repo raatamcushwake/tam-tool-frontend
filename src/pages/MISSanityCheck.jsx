@@ -197,10 +197,36 @@ const checkApproval = (my) => {
   }
 };
 
+// Check BOTH: the derived next month AND the frozen/submitted month
+// because failed sanity is stored under the submitted month (e.g. MAR-2026)
+// but derivedMonthYear is the next month (APR-2026)
+const frozenMonth = meta?.monthYear || null; // e.g. MAR-2026
+
 checkApproval(derivedMonthYear);
 
-// Poll every 30s so Maker sees approval without page refresh
-const interval = setInterval(() => checkApproval(derivedMonthYear), 30000);
+// Also check if the frozen month itself has an APPROVED submission (failed sanity approved by manager)
+if (frozenMonth) {
+  getSanitySubmission(projectId, frozenMonth).then(data => {
+    if (data?.status === "APPROVED") {
+      localStorage.setItem("sanityPassed", JSON.stringify(true));
+      window.dispatchEvent(new Event("storage"));
+      setCurrentSubmissionStatus("APPROVED");
+    }
+  });
+}
+
+const interval = setInterval(() => {
+  checkApproval(derivedMonthYear);
+  if (frozenMonth) {
+    getSanitySubmission(projectId, frozenMonth).then(data => {
+      if (data?.status === "APPROVED") {
+        localStorage.setItem("sanityPassed", JSON.stringify(true));
+        window.dispatchEvent(new Event("storage"));
+        setCurrentSubmissionStatus("APPROVED");
+      }
+    });
+  }
+}, 30000);
 return () => clearInterval(interval);
     });
   }, [selectedProject, isMaker]);
