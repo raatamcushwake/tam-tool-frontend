@@ -169,31 +169,39 @@ export default function MISSanityCheck() {
 // Only auto-unlock if sanityPassed is not already null
 // (null means MIS Analysis was approved and cycle reset)
 // Also try fetching all submissions to find any pending one
-if (derivedMonthYear) {
-  getSanitySubmission(projectId, derivedMonthYear).then(data => {
-    if (data) {
-      setCurrentSubmissionStatus(data.status);
-      if (data.status === "APPROVED") {
-        localStorage.setItem("sanityPassed", JSON.stringify(true));
-        window.dispatchEvent(new Event("storage"));
+const checkApproval = (my) => {
+  if (my) {
+    getSanitySubmission(projectId, my).then(data => {
+      if (data) {
+        setCurrentSubmissionStatus(data.status);
+        if (data.status === "APPROVED") {
+          localStorage.setItem("sanityPassed", JSON.stringify(true));
+          window.dispatchEvent(new Event("storage"));
+        }
+      } else {
+        setCurrentSubmissionStatus(null);
       }
-    } else {
-      setCurrentSubmissionStatus(null);
-    }
-  });
-} else {
-  getAllSanitySubmissions(projectId).then(subs => {
-    if (subs.length > 0) {
-      const latest = subs[0];
-      setCurrentSubmissionStatus(latest.status);
-      setMonthYear(latest.monthYear || "");
-      if (latest.status === "APPROVED") {
-        localStorage.setItem("sanityPassed", JSON.stringify(true));
-        window.dispatchEvent(new Event("storage"));
+    });
+  } else {
+    getAllSanitySubmissions(projectId).then(subs => {
+      if (subs.length > 0) {
+        const latest = subs[0];
+        setCurrentSubmissionStatus(latest.status);
+        setMonthYear(latest.monthYear || "");
+        if (latest.status === "APPROVED") {
+          localStorage.setItem("sanityPassed", JSON.stringify(true));
+          window.dispatchEvent(new Event("storage"));
+        }
       }
-    }
-  });
-}
+    });
+  }
+};
+
+checkApproval(derivedMonthYear);
+
+// Poll every 30s so Maker sees approval without page refresh
+const interval = setInterval(() => checkApproval(derivedMonthYear), 30000);
+return () => clearInterval(interval);
     });
   }, [selectedProject, isMaker]);
 
@@ -459,7 +467,8 @@ if (derivedMonthYear) {
         console.error("Storage upload error:", storageErr);
       }
 
-      // Manager's localStorage is irrelevant — Maker's side reads from Firestore via useEffect
+      localStorage.setItem("sanityPassed", JSON.stringify(true));
+window.dispatchEvent(new Event("storage"));
 alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for the Maker.');
     } else {
       await managerRejectSanity(
