@@ -144,6 +144,7 @@ export default function MISSanityCheck() {
    // Load frozen metadata AND auto-set monthYear AND check approval status on page load
   useEffect(() => {
     const projectId = selectedProject?.projectId;
+    const projectName = selectedProject?.projectName || selectedProject?.projectId;
     if (!projectId || !isMaker) return;
 
     getFrozenSanityMetadata(projectId).then(meta => {
@@ -167,26 +168,39 @@ export default function MISSanityCheck() {
       // Check approval on the FROZEN month (where approval is stored), not the derived next month
 // Only auto-unlock if sanityPassed is not already null
 // (null means MIS Analysis was approved and cycle reset)
-const monthToCheck = meta?.monthYear || derivedMonthYear;
-      if (monthToCheck) {
-        getSanitySubmission(projectId, monthToCheck).then(data => {
-          if (data) {
-            setCurrentSubmissionStatus(data.status);
-            if (data.status === "APPROVED") {
-              localStorage.setItem("sanityPassed", JSON.stringify(true));
-              window.dispatchEvent(new Event("storage"));
-            }
-          } else {
-            setCurrentSubmissionStatus(null);
-          }
-        });
+// Also try fetching all submissions to find any pending one
+if (derivedMonthYear) {
+  getSanitySubmission(projectId, derivedMonthYear).then(data => {
+    if (data) {
+      setCurrentSubmissionStatus(data.status);
+      if (data.status === "APPROVED") {
+        localStorage.setItem("sanityPassed", JSON.stringify(true));
+        window.dispatchEvent(new Event("storage"));
       }
+    } else {
+      setCurrentSubmissionStatus(null);
+    }
+  });
+} else {
+  getAllSanitySubmissions(projectId).then(subs => {
+    if (subs.length > 0) {
+      const latest = subs[0];
+      setCurrentSubmissionStatus(latest.status);
+      setMonthYear(latest.monthYear || "");
+      if (latest.status === "APPROVED") {
+        localStorage.setItem("sanityPassed", JSON.stringify(true));
+        window.dispatchEvent(new Event("storage"));
+      }
+    }
+  });
+}
     });
   }, [selectedProject, isMaker]);
 
   // Re-check status whenever Maker manually changes the month
   useEffect(() => {
     const projectId = selectedProject?.projectId;
+    const projectName = selectedProject?.projectName || selectedProject?.projectId;
     if (!projectId || !monthYear || !isMaker) return;
     getSanitySubmission(projectId, monthYear).then(data => {
       if (data) {
@@ -203,6 +217,7 @@ const monthToCheck = meta?.monthYear || derivedMonthYear;
   // Load all submissions for Reviewer/Manager
   useEffect(() => {
     const projectId = selectedProject?.projectId;
+    const projectName = selectedProject?.projectName || selectedProject?.projectId;
     if (!projectId || isMaker) return;
     setSubmissionsLoading(true);
     getAllSanitySubmissions(projectId).then(data => {
@@ -265,7 +280,8 @@ const monthToCheck = meta?.monthYear || derivedMonthYear;
             await uploadFrozenSanityFile(
               selectedProject.projectId,
               monthYear,
-              files.curr
+              files.curr,
+              selectedProject.projectName
             );
           } catch (freezeErr) {
             console.error("Failed to freeze sanity file:", freezeErr);
@@ -291,7 +307,7 @@ const monthToCheck = meta?.monthYear || derivedMonthYear;
 
     let currFileURL = "";
     try {
-      const uploadRef = ref(storage, `projects/${selectedProject.projectId}/pendingSanityMIS/${monthYear}.xlsx`);
+      const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/pendingSanityMIS/${monthYear}.xlsx`);
       await uploadBytes(uploadRef, files.curr, {
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
@@ -305,7 +321,7 @@ const monthToCheck = meta?.monthYear || derivedMonthYear;
     let makerProofDocuments = [];
     for (const file of makerProofFiles) {
       const uploadResult = await uploadProofDocument(
-        selectedProject.projectId, monthYear, file, "maker"
+        selectedProject.projectId, monthYear, file, "maker", selectedProject.projectName
       );
       if (uploadResult.success) {
         makerProofDocuments.push({ fileName: uploadResult.fileName, downloadURL: uploadResult.downloadURL });
