@@ -154,10 +154,16 @@ export const managerRejectSanity = async (projectId, monthYear, email, comment) 
   }
 };
 
-// Upload frozen sanity file (called on Manager approval)
-export const uploadFrozenSanityFile = async (projectId, monthYear, file) => {
+const getStoragePath = async (projectId) => {
+  const snap = await getDoc(doc(db, "projects", projectId));
+  const name = snap.data()?.projectName || snap.data()?.name || projectId;
+  return name.trim().replace(/\s+/g, '_');
+};
+
+export const uploadFrozenSanityFile = async (projectId, monthYear, file, projectName) => {
   try {
-    const fileRef = ref(storage, `projects/${projectId}/frozenSanityMIS/${monthYear}.xlsx`);
+    const storagePath = projectName || await getStoragePath(projectId);
+    const fileRef = ref(storage, `projects/${storagePath}/frozenSanityMIS/${monthYear}.xlsx`);
     await uploadBytes(fileRef, file, {
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
@@ -218,11 +224,12 @@ export const isSanityApproved = async (projectId, monthYear) => {
 };
 
 // Upload proof document (Maker or Reviewer)
-export const uploadProofDocument = async (projectId, monthYear, file, uploadedBy = "maker") => {
+export const uploadProofDocument = async (projectId, monthYear, file, uploadedBy = "maker", projectName) => {
   try {
+    const storagePath = projectName || await getStoragePath(projectId);
     const ext = file.name.split('.').pop();
     const fileName = `${uploadedBy}_proof_${Date.now()}.${ext}`;
-    const fileRef = ref(storage, `projects/${projectId}/sanityProofs/${monthYear}/${fileName}`);
+    const fileRef = ref(storage, `projects/${storagePath}/sanityProofs/${monthYear}/${fileName}`);
     await uploadBytes(fileRef, file, { contentType: file.type });
     const downloadURL = await getDownloadURL(fileRef);
     return { success: true, downloadURL, fileName };
