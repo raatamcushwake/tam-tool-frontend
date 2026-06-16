@@ -576,7 +576,7 @@ else atMSP.push(entry);
   }, [extractedData, activeTab, searchTerm, selectedAgingFilter, selectedSaleFilter]);
 
   const handleAttachmentUpload = async (unitNo, file) => {
-    const uploadRef = ref(storage, `projects/${selectedProject.projectId}/bookingAttachments/${unitNo}_${file.name}`);
+    const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/bookingAttachments/${unitNo}_${file.name}`);
     await uploadBytes(uploadRef, file);
     const url = await getDownloadURL(uploadRef);
     setRowAttachmentURLs(prev => ({
@@ -678,7 +678,7 @@ else atMSP.push(entry);
     // Upload current month file to Storage first
 let currFileURL = "";
 try {
-  const uploadRef = ref(storage, `projects/${selectedProject.projectId}/pendingMIS/${monthYear}.xlsx`);
+  const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/pendingMIS/${monthYear}.xlsx`);
   await uploadBytes(uploadRef, files.curr, {
     contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
@@ -1158,7 +1158,7 @@ return (
                   <input type="file" className="hidden" onChange={async e => {
                     if (!e.target.files[0]) return;
                     const file = e.target.files[0];
-                    const uploadRef = ref(storage, `projects/${selectedProject.projectId}/reviewerAttachments/${row["Unit No."]}_${file.name}`);
+                    const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/reviewerAttachments/${row["Unit No."]}_${file.name}`);
                     await uploadBytes(uploadRef, file);
                     const url = await getDownloadURL(uploadRef);
                     const docRef = doc(db, "projects", selectedProject.projectId, "misSubmissions", selectedSubmission.monthYear);
