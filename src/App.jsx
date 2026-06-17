@@ -4,6 +4,7 @@ import { ProjectProvider, useProject } from "./context/ProjectContext";
 import Login from "./pages/Login";
 import LandingPage from "./pages/LandingPage";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
 import PendingApproval from "./pages/PendingApproval";
 import ProjectSelector from "./pages/ProjectSelector";
 import Dashboard from "./pages/Dashboard";
@@ -69,6 +70,11 @@ function AppRoutes() {
 } />
       <Route path="/register" element={
         <PublicRoute><Register /></PublicRoute>
+      } />
+
+       {/* ADD THIS 👇 */}
+      <Route path="/forgot-password" element={
+        <PublicRoute><ForgotPassword /></PublicRoute>
       } />
 
       {/* Pending */}
