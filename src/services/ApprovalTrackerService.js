@@ -13,7 +13,11 @@ export const APPROVAL_STATUS_CONFIG = {
 // ── Manager: upload required approvals list ──
 export const uploadRequiredApprovalsList = async (projectId, file) => {
   try {
-    const fileRef = ref(storage, `projects/${projectId}/approvalReference/required_approvals.xlsx`);
+    const projSnap = await getDoc(doc(db, "projects", projectId));
+const projName = projSnap.data()?.projectName || projSnap.data()?.name || projectId;
+const storagePath = projName.trim().replace(/\s+/g, '_');
+
+const fileRef = ref(storage, `projects/${storagePath}/approvalReference/required_approvals.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
     await setDoc(doc(db, "projects", projectId, "approvalReference", "masterList"), {
