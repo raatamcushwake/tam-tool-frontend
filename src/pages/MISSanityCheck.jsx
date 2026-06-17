@@ -305,13 +305,23 @@ return () => clearInterval(interval);
       // PASSED → unlock immediately, no approval needed
       // FAILED → lock, needs Manager approval via workflow
       if (data.sanity_check_passed) {
-        localStorage.setItem("sanityPassed", JSON.stringify(true));
-        window.dispatchEvent(new Event("storage"));
+  localStorage.setItem("sanityPassed", JSON.stringify(true));
+  window.dispatchEvent(new Event("storage"));
 
-        // Freeze the current month MIS file as Sanity frozen file
-        if (files.curr && monthYear) {
-          try {
-            await uploadFrozenSanityFile(
+  // ✅ Write to Firestore so lock state works across devices
+  const { setCycleState } = await import("../services/cycleStateService");
+  await setCycleState(selectedProject.projectId, {
+    sanityApproved: true,
+    misAnalysisLocked: false,
+    cycleMonth: monthYear,
+    sanityPassedAt: new Date().toISOString(),
+    misApprovedAt: null,
+  });
+
+  // Freeze the current month MIS file as Sanity frozen file
+  if (files.curr && monthYear) {
+    try {
+      await uploadFrozenSanityFile(
               selectedProject.projectId,
               monthYear,
               files.curr,
@@ -493,7 +503,9 @@ return () => clearInterval(interval);
         console.error("Storage upload error:", storageErr);
       }
 
-      localStorage.setItem("sanityPassed", JSON.stringify(true));
+      // ✅ Already handled inside managerApproveSanity service function
+// but also sync localStorage for immediate UI update
+localStorage.setItem("sanityPassed", JSON.stringify(true));
 window.dispatchEvent(new Event("storage"));
 alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for the Maker.');
     } else {
