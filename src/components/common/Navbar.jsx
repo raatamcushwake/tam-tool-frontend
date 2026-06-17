@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useProject } from "../../context/ProjectContext";
-import { Bell, Search, FolderKanban, X, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Bell, Search, FolderKanban, X, CheckCircle, AlertCircle, Clock, User, KeyRound } from "lucide-react";
 import { getNotificationsForRole } from "../../services/notificationService";
 
 const ROLE_COLORS = {
@@ -44,6 +45,9 @@ export default function Navbar({ title = "Dashboard" }) {
 
   const bellRef = useRef(null);
   const panelRef = useRef(null);
+  const userMenuRef = useRef(null);
+  const navigate = useNavigate();
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -95,6 +99,17 @@ export default function Navbar({ title = "Dashboard" }) {
         bellRef.current && !bellRef.current.contains(e.target)
       ) {
         setShowNotifications(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setShowUserMenu(false);
       }
     };
     document.addEventListener("mousedown", handleClick);
