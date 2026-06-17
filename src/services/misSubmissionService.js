@@ -107,6 +107,15 @@ export const managerApproveMIS = async (projectId, monthYear, managerEmail, comm
     approvedAt: new Date().toISOString(),
     managerComment: comment || "",
   });
+
+  // 🔒 Lock MIS Analysis again — cycle complete
+  const { setCycleState } = await import("./cycleStateService");
+  await setCycleState(projectId, {
+    sanityApproved: false,
+    misAnalysisLocked: true,
+    misApprovedMonth: monthYear,
+    misApprovedAt: new Date().toISOString(),
+  });
 };
 
 // ── Manager Reject ────────────────────────────────────────────
