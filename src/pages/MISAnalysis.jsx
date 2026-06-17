@@ -22,6 +22,7 @@ import * as XLSX from "xlsx-js-style";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage, db } from "../services/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { getCycleState } from "../services/cycleStateService";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
   const inputRef = useRef(null);
@@ -86,18 +87,37 @@ export default function MISAnalysis() {
   const isReviewer = selectedProject?.role === "REVIEWER";
   const isManager = selectedProject?.role === "MANAGER";
   const [sanityPassed, setSanityPassed] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("sanityPassed")) || false; }
-    catch { return false; }
-  });
+  try { return JSON.parse(localStorage.getItem("sanityPassed")) || false; }
+  catch { return false; }
+});
+const [cycleStateData, setCycleStateData] = useState(null);
+const [cycleLoading, setCycleLoading] = useState(true);
 
   useEffect(() => {
-    const handleStorageChange = () => {
-      try { setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false); }
-      catch { setSanityPassed(false); }
-    };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
+  const handleStorageChange = () => {
+    try { setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false); }
+    catch { setSanityPassed(false); }
+  };
+  window.addEventListener("storage", handleStorageChange);
+  return () => window.removeEventListener("storage", handleStorageChange);
+}, []);
+
+useEffect(() => {
+  if (!selectedProject?.projectId || !isMaker) {
+    setCycleLoading(false);
+    return;
+  }
+  getCycleState(selectedProject.projectId).then(state => {
+    setCycleStateData(state);
+    setCycleLoading(false);
+    if (state?.sanityApproved && !state?.misAnalysisLocked) {
+      localStorage.setItem("sanityPassed", JSON.stringify(true));
+    } else {
+      localStorage.setItem("sanityPassed", JSON.stringify(false));
+    }
+    window.dispatchEvent(new Event("storage"));
+  });
+}, [selectedProject, isMaker]);
 
   const [files, setFiles] = useState({ prev: null, curr: null });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -787,11 +807,18 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       console.error("Storage upload error:", storageErr);
     }
 
-    // Lock MIS Analysis again — Sanity must be re-run for next month
-    localStorage.removeItem("sanityPassed");
-    localStorage.removeItem("misSubmitted");
-    window.dispatchEvent(new Event("storage"));
-    alert('✅ Final Approved! Month is now frozen. MIS Analysis is now locked for next month cycle.');
+    // Lock MIS Analysis again — write to Firestore
+const { setCycleState } = await import("../services/cycleStateService");
+await setCycleState(selectedProject.projectId, {
+  sanityApproved: false,
+  misAnalysisLocked: true,
+  misApprovedMonth: monthYear,
+  misApprovedAt: new Date().toISOString(),
+});
+localStorage.removeItem("sanityPassed");
+localStorage.removeItem("misSubmitted");
+window.dispatchEvent(new Event("storage"));
+alert('✅ Final Approved! Month is now frozen. MIS Analysis is now locked for next month cycle.');
   } else {
     await managerRejectMIS(
       selectedProject.projectId,
@@ -1473,24 +1500,41 @@ return (
 
   // Sanity Gate
   const misSubmittedLocal = (() => { try { return JSON.parse(localStorage.getItem("misSubmitted")) || false; } catch { return false; } })();
-  if (isMaker && !sanityPassed && !misSubmittedLocal) {
-    return (
-      <Layout title="MIS Analysis">
-        <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-4">
-            <ShieldX size={32} className="text-red-500" />
-          </div>
-          <h2 className="text-gray-800 font-bold text-xl mb-2">Access Restricted</h2>
-          <p className="text-gray-400 text-sm max-w-sm">MIS Analysis is locked until the Sanity Check passes.</p>
-          <button onClick={() => navigate("/mis-sanity")}
-            className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition">
-            Go to MIS Sanity Check
-          </button>
-        </div>
-      </Layout>
-    );
-  }
 
+if (isMaker && cycleLoading) {
+  return (
+    <Layout title="MIS Analysis">
+      <div className="flex items-center justify-center h-[60vh]">
+        <p className="text-gray-400 text-sm">Checking access...</p>
+      </div>
+    </Layout>
+  );
+}
+
+const isMisLocked = isMaker && (
+  !cycleStateData?.sanityApproved ||
+  cycleStateData?.misAnalysisLocked === true
+) && !misSubmittedLocal;
+
+if (isMisLocked) {
+  return (
+    <Layout title="MIS Analysis">
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+        <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-4">
+          <ShieldX size={32} className="text-red-500" />
+        </div>
+        <h2 className="text-gray-800 font-bold text-xl mb-2">Access Restricted</h2>
+        <p className="text-gray-400 text-sm max-w-sm">
+          MIS Analysis is locked. Complete Sanity Check or wait for Manager approval.
+        </p>
+        <button onClick={() => navigate("/mis-sanity")}
+          className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition">
+          Go to MIS Sanity Check
+        </button>
+      </div>
+    </Layout>
+  );
+}
   const hasData = extractedData.length > 0;
 
   // ── Shared analysis render (used by all roles) ────────────────────────────────
