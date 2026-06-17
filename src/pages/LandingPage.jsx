@@ -1,10 +1,12 @@
+import { useState, useRef, useEffect } from "react";
+
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useProject } from "../context/ProjectContext";
 import {
   BarChart3, FileSpreadsheet, DollarSign, ShieldCheck,
   ClipboardList, FolderKanban, ArrowRight, LogOut,
-  TrendingUp, Shield, Zap, LayoutDashboard, Users, Settings
+  TrendingUp, Shield, Zap, LayoutDashboard, Users, Settings, KeyRound
 } from "lucide-react";
 
 const features = [
@@ -31,9 +33,20 @@ const ROLE_DESCRIPTIONS = {
 export default function LandingPage() {
   const navigate = useNavigate();
   const { userProfile, logout, isAdmin } = useAuth();
-const { selectProject } = useProject();
+  const { selectProject } = useProject();
+  const projectRoles = userProfile?.projectRoles || [];
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef(null);
 
-const projectRoles = userProfile?.projectRoles || [];
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
 
   const handleSelectProject = (pr) => {
@@ -61,16 +74,36 @@ const projectRoles = userProfile?.projectRoles || [];
         </div>
         <div className="flex items-center gap-4">
           {userProfile?.name && (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs font-bold">
-                  {userProfile.name[0].toUpperCase()}
-                </span>
-              </div>
-              <div className="hidden md:block">
-  <p className="text-gray-800 text-sm font-semibold leading-tight">{userProfile.name}</p>
-  <p className="text-gray-400 text-xs">Cushman & Wakefield</p>
-</div>
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={() => setShowUserMenu(p => !p)}
+                className="flex items-center gap-2 hover:opacity-80 transition"
+              >
+                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">
+                    {userProfile.name[0].toUpperCase()}
+                  </span>
+                </div>
+                <div className="hidden md:block text-left">
+                  <p className="text-gray-800 text-sm font-semibold leading-tight">{userProfile.name}</p>
+                  <p className="text-gray-400 text-xs">Cushman & Wakefield</p>
+                </div>
+              </button>
+
+              {showUserMenu && (
+                <div className="absolute right-0 top-12 w-48 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <p className="text-sm font-bold text-gray-800">{userProfile.name}</p>
+                  </div>
+                  <button
+                    onClick={() => { setShowUserMenu(false); navigate("/change-password"); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    <KeyRound size={15} className="text-gray-400" />
+                    Change Password
+                  </button>
+                </div>
+              )}
             </div>
           )}
           <button
