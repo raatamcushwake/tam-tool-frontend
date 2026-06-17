@@ -130,6 +130,17 @@ export const managerApproveSanity = async (projectId, monthYear, email, comment)
       approvedAt: serverTimestamp(),
       sanityFrozen: true,
     });
+
+    // ✅ Write cycle state to Firestore — MIS Analysis now unlocked
+    const { setCycleState } = await import("./cycleStateService");
+    await setCycleState(projectId, {
+      sanityApproved: true,
+      misAnalysisLocked: false,
+      cycleMonth: monthYear,
+      sanityApprovedAt: new Date().toISOString(),
+      misApprovedAt: null,
+    });
+
     return { success: true };
   } catch (error) {
     console.error("managerApproveSanity error:", error);
