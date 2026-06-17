@@ -12,6 +12,7 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+const [profileLoading, setProfileLoading] = useState(true);
 
   const login = async (email, password) => {
   const result = await signInWithEmailAndPassword(auth, email, password);
@@ -42,19 +43,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setCurrentUser(user);
-        await fetchUserProfile(user.uid);
-        setLoading(false);
-      } else {
-        setCurrentUser(null);
-        setUserProfile(null);
-        setLoading(false);
-      }
-    });
-    return unsubscribe;
-  }, []);
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      setCurrentUser(user);
+      setProfileLoading(true);
+      await fetchUserProfile(user.uid);
+      setProfileLoading(false);
+      setLoading(false);
+    } else {
+      setCurrentUser(null);
+      setUserProfile(null);
+      setProfileLoading(false);
+      setLoading(false);
+    }
+  });
+  return unsubscribe;
+}, []);
 
   // ─── Derived helpers ───────────────────────────────────────
   const isAdmin = userProfile?.isAdmin === true;
@@ -66,15 +70,16 @@ export const AuthProvider = ({ children }) => {
                     userProfile?.status === "pending";
 
   const value = {
-    currentUser,
-    userProfile,
-    login,
-    logout,
-    fetchUserProfile,
-    isAdmin,
-    isActive,
-    isPending,
-  };
+  currentUser,
+  userProfile,
+  login,
+  logout,
+  fetchUserProfile,
+  isAdmin,
+  isActive,
+  isPending,
+  profileLoading,
+};
 
   return (
     <AuthContext.Provider value={value}>
