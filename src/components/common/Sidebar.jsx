@@ -7,6 +7,7 @@ import {
   ShieldCheck, ClipboardList, FolderKanban, LogOut,
   ChevronLeft, ChevronRight, Users, Settings, Upload
 } from "lucide-react";
+import { getCycleState } from "../../services/cycleStateService";
 
 const navItems = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -69,6 +70,18 @@ const isMaker = currentRole === "MAKER";
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
+
+  useEffect(() => {
+  if (!selectedProject?.projectId || !isMaker) return;
+  getCycleState(selectedProject.projectId).then(state => {
+    if (state?.sanityApproved && !state?.misAnalysisLocked) {
+      localStorage.setItem("sanityPassed", JSON.stringify(true));
+    } else {
+      localStorage.setItem("sanityPassed", JSON.stringify(false));
+    }
+    setSanityPassed(state?.sanityApproved && !state?.misAnalysisLocked ? true : false);
+  });
+}, [selectedProject, isMaker]);
 
   const handleLogout = async () => {
   localStorage.removeItem("sanityPassed");
