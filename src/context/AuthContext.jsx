@@ -14,14 +14,19 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const login = async (email, password) => {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    return result;
-  };
+  const result = await signInWithEmailAndPassword(auth, email, password);
+  // Clear stale cycle state on every fresh login
+  localStorage.removeItem("sanityPassed");
+  localStorage.removeItem("misSubmitted");
+  return result;
+};
 
   const logout = async () => {
   await signOut(auth);
   setUserProfile(null);
   localStorage.removeItem("selectedProject");
+  localStorage.removeItem("sanityPassed");
+  localStorage.removeItem("misSubmitted");
 };
 
   const fetchUserProfile = async (uid) => {
