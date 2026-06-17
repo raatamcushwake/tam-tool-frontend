@@ -18,6 +18,7 @@ import AdminPanel from "./pages/AdminPanel";
 import ProjectAssignment from "./pages/ProjectAssignment";
 import ReferenceUpload from "./pages/ReferenceUpload";
 import AdminTracker from "./pages/AdminTracker";
+import ChangePassword from "./pages/ChangePassword";
 
 // ─── Route Guards ────────────────────────────────────────────
 
@@ -122,6 +123,9 @@ function AppRoutes() {
       } />
       <Route path="/reference-upload" element={
         <ActiveRoute><ReferenceUpload /></ActiveRoute>
+      } />
+      <Route path="/change-password" element={
+        <ProtectedRoute><ChangePassword /></ProtectedRoute>
       } />
 
       {/* Fallback */}
