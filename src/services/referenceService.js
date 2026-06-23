@@ -5,7 +5,7 @@ import { auth } from "./firebase";
 
 const getStoragePath = async (projectId) => {
   const snap = await getDoc(doc(db, "projects", projectId));
-  const name = snap.data()?.projectName || projectId;
+  const name = snap.data()?.projectName || snap.data()?.name || projectId;
   return name.trim().replace(/\s+/g, '_');
 };
 
