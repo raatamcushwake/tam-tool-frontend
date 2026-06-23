@@ -13,7 +13,7 @@ const getStoragePath = async (projectId) => {
 export const uploadInventoryData = async (projectId, rows, file) => {
   try {
     const storagePath = await getStoragePath(projectId);
-    const fileRef = ref(storage, `projects/${storagePath}/frozenSanityMIS/inventory_latest.xlsx`);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/inventory_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
     await setDoc(doc(db, "projects", projectId, "referenceData", "inventory"), {
@@ -34,7 +34,7 @@ export const uploadInventoryData = async (projectId, rows, file) => {
 export const uploadBusinessPlanData = async (projectId, quarters, file) => {
   try {
     const storagePath = await getStoragePath(projectId);
-    const fileRef = ref(storage, `projects/${storagePath}/frozenSanityMIS/businessplan_latest.xlsx`);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/businessplan_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
     await setDoc(doc(db, "projects", projectId, "referenceData", "businessPlan"), {
@@ -55,7 +55,7 @@ export const uploadBusinessPlanData = async (projectId, quarters, file) => {
 export const uploadMSPData = async (projectId, rates, file) => {
   try {
     const storagePath = await getStoragePath(projectId);
-    const fileRef = ref(storage, `projects/${storagePath}/frozenSanityMIS/msp_latest.xlsx`);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/msp_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
     await setDoc(doc(db, "projects", projectId, "referenceData", "msp"), {
