@@ -1086,7 +1086,11 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                 )}
                 {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
   <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
-    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-run sanity and resubmit.</p>
+    <p className="text-xs font-bold text-red-600">
+      {currentSubmissionStatus === 'REJECTED_BY_MANAGER'
+        ? '⏳ Manager rejected — waiting for Reviewer to review and send back to you.'
+        : '❌ Reviewer rejected. Please re-run sanity and resubmit.'}
+    </p>
     {rejectionInfo?.rejectionComment && (
       <p className="text-xs text-red-500 mt-2 italic">
         💬 {currentSubmissionStatus === 'REJECTED_BY_REVIEWER' ? 'Reviewer' : 'Manager'} comment: "{rejectionInfo.rejectionComment}"
@@ -1181,15 +1185,16 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                   </div>
                   <button
                     onClick={handleSubmitForReview}
-                    disabled={!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER'}
+                    disabled={!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER'}
                     className={`w-full font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm
                       ${(!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER')
                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         : 'bg-red-500 hover:bg-red-600 text-white'}`}>
                     {actionLoading ? 'Submitting...' :
-                     currentSubmissionStatus === 'PENDING_REVIEW' ? '⏳ Awaiting Review' :
-                     currentSubmissionStatus === 'PENDING_MANAGER' ? '⏳ Awaiting Manager Approval' :
-                     <><Send size={14} /> Submit Failed Sanity for Review</>}
+ currentSubmissionStatus === 'PENDING_REVIEW' ? '⏳ Awaiting Review' :
+ currentSubmissionStatus === 'PENDING_MANAGER' ? '⏳ Awaiting Manager Approval' :
+ currentSubmissionStatus === 'REJECTED_BY_MANAGER' ? '⏳ Awaiting Reviewer Action' :
+ <><Send size={14} /> Submit Failed Sanity for Review</>}
                   </button>
                 </div>
               )}
@@ -1278,11 +1283,11 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                     {isReviewer ? '👁 Reviewer Action' : '✅ Manager Final Action'} — {selectedSubmission.monthYear}
                   </p>
                   {isManager && (
-                    <p className="text-xs text-amber-600 font-semibold mb-3">
-                      ⚠ If you approve, MIS Analysis will be unlocked for the Maker.
-                      If you reject, it goes back to Reviewer with your comments.
-                    </p>
-                  )}
+  <p className="text-xs text-amber-600 font-semibold mb-3">
+    ⚠ If you approve, MIS Analysis will be unlocked for the Maker.
+    If you reject, it goes back to Reviewer with your comments.
+  </p>
+)}
                   {isReviewer && selectedSubmission.status === 'REJECTED_BY_MANAGER' && (
                     <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
                       <p className="text-xs font-bold text-red-600">
