@@ -21,7 +21,7 @@ const getStoragePath = async (projectId) => {
 export const uploadCostBPFile = async (projectId, file, projectName) => {
   try {
     const storagePath = projectName || await getStoragePath(projectId);
-    const fileRef = ref(storage, `projects/${storagePath}/costReference/businessPlan_latest.xlsx`);
+    const fileRef = ref(storage, `projects/${storagePath}/reference/businessPlan_latest.xlsx`);
     await uploadBytes(fileRef, file);
     const fileUrl = await getDownloadURL(fileRef);
 
