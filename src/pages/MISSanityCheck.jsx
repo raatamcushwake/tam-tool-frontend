@@ -1271,7 +1271,7 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
           {selectedSubmission && (
             <>
               {/* Approve / Reject actions — shown only for correct role + status */}
-              {((isReviewer && selectedSubmission.status === 'PENDING_REVIEW') ||
+              {((isReviewer && (selectedSubmission.status === 'PENDING_REVIEW' || selectedSubmission.status === 'REJECTED_BY_MANAGER')) ||
                 (isManager && selectedSubmission.status === 'PENDING_MANAGER')) && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
                   <p className="text-sm font-black uppercase text-gray-400 mb-1">
@@ -1282,6 +1282,21 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                       ⚠ If you approve, MIS Analysis will be unlocked for the Maker.
                       If you reject, it goes back to Reviewer with your comments.
                     </p>
+                  )}
+                  {isReviewer && selectedSubmission.status === 'REJECTED_BY_MANAGER' && (
+                    <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                      <p className="text-xs font-bold text-red-600">
+                        ❌ Manager rejected this submission.
+                      </p>
+                      {selectedSubmission.rejectionComment && (
+                        <p className="text-xs text-red-500 mt-1 italic">
+                          💬 Manager's reason: "{selectedSubmission.rejectionComment}"
+                        </p>
+                      )}
+                      <p className="text-xs text-amber-600 mt-2 font-semibold">
+                        You can re-send to Manager with your comment, or reject back to Maker.
+                      </p>
+                    </div>
                   )}
 
                   {/* Maker proof documents — visible to Reviewer and Manager */}
@@ -1333,7 +1348,11 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                       disabled={actionLoading}
                       className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
                       <ThumbsUp size={15} />
-                      {isReviewer ? 'Approve → Send to Manager' : 'Final Approve & Unlock MIS Analysis'}
+                      {isReviewer
+                        ? selectedSubmission.status === 'REJECTED_BY_MANAGER'
+                          ? 'Re-send to Manager'
+                          : 'Approve → Send to Manager'
+                        : 'Final Approve & Unlock MIS Analysis'}
                     </button>
                     <button
                       onClick={() => isReviewer ? handleReviewerAction(false) : handleManagerAction(false)}
