@@ -126,6 +126,7 @@ export default function MISSanityCheck() {
   const [frozenMISMetadata, setFrozenMISMetadata] = useState(null);
   const [frozenFileLoading, setFrozenFileLoading] = useState(false);
   const [frozenFileLoaded, setFrozenFileLoaded] = useState(false);
+  const [rejectionInfo, setRejectionInfo] = useState(null);
 
   const makerCommentRef = useRef("");
   const reviewerCommentRef = useRef("");
@@ -237,15 +238,19 @@ return () => clearInterval(interval);
     const projectName = selectedProject?.projectName || selectedProject?.projectId;
     if (!projectId || !monthYear || !isMaker) return;
     getSanitySubmission(projectId, monthYear).then(data => {
-      if (data) {
-        setCurrentSubmissionStatus(data.status);
-        if (data.status === "APPROVED") {
-          localStorage.setItem("sanityPassed", JSON.stringify(true));
-        }
-      } else {
-        setCurrentSubmissionStatus(null);
-      }
+  if (data) {
+    setCurrentSubmissionStatus(data.status);
+    setRejectionInfo({
+      rejectionComment: data.rejectionComment || "",
+      reviewerComment: data.reviewerComment || "",
+      approvedBy: data.approvedBy || "",
+      reviewedBy: data.reviewedBy || "",
     });
+  } else {
+    setCurrentSubmissionStatus(null);
+    setRejectionInfo(null);
+  }
+});
   }, [selectedProject, monthYear, isMaker]);
 
   // Load all submissions for Reviewer/Manager
@@ -1080,10 +1085,20 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                   </div>
                 )}
                 {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
-                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
-                    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-run sanity and resubmit.</p>
-                  </div>
-                )}
+  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-run sanity and resubmit.</p>
+    {rejectionInfo?.rejectionComment && (
+      <p className="text-xs text-red-500 mt-2 italic">
+        💬 {currentSubmissionStatus === 'REJECTED_BY_REVIEWER' ? 'Reviewer' : 'Manager'} comment: "{rejectionInfo.rejectionComment}"
+      </p>
+    )}
+    {rejectionInfo?.reviewerComment && currentSubmissionStatus === 'REJECTED_BY_REVIEWER' && (
+      <p className="text-xs text-purple-500 mt-1 italic">
+        👁 Reviewer note: "{rejectionInfo.reviewerComment}"
+      </p>
+    )}
+  </div>
+)}
               </div>
             </div>
           )}
