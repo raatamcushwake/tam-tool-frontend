@@ -18,8 +18,8 @@ export const STATUS_CONFIG = {
 // ── Helper: get human-readable storage path from project name ─
 const getStoragePath = async (projectId) => {
   const snap = await getDoc(doc(db, "projects", projectId));
-  const name = snap.data()?.projectName || projectId;
-  return name.trim().replace(/\s+/g, '_');
+  const name = snap.data()?.projectName || snap.data()?.name || projectId;
+  return name.trim();
 };
 
 // ── Submit MIS for Review ─────────────────────────────────────
