@@ -564,7 +564,7 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
       case "anomaly": return [
         ...(r.anomaly_units || r.anomalyUnits || []),
         ...(r.transferred_units || r.transferredUnits || []).filter(u => u.anomaly_detected)
-      ];
+      ].filter((u, i, arr) => arr.findIndex(x => x['Unit No.'] === u['Unit No.'] && x.curr_customer === u.curr_customer) === i);
       case "name_correction": return r.name_corrections || r.nameCorrections || [];
       case "cancelled": return r.cancelled_units || r.cancelledUnits || [];
       case "duplicate": return r.duplicate_units || r.duplicateUnits || [];
