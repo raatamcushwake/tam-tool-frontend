@@ -15,7 +15,7 @@ export const COST_STATUS_CONFIG = {
 const getStoragePath = async (projectId) => {
   const snap = await getDoc(doc(db, "projects", projectId));
   const name = snap.data()?.projectName || snap.data()?.name || projectId;
-  return name.trim().replace(/\s+/g, '_');
+  return name.trim();
 };
 
 export const uploadCostBPFile = async (projectId, file, projectName) => {
