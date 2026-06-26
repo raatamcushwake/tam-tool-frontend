@@ -23,6 +23,7 @@ const TYPE_COLOR = {
   "MIS":               "bg-blue-100 text-blue-700",
   "CS Tracker":        "bg-teal-100 text-teal-700",
   "Approval Tracker":  "bg-orange-100 text-orange-700",
+  "Cost Analysis":     "bg-pink-100 text-pink-700",
 };
 
 const fmt = (val) => {
@@ -78,7 +79,7 @@ export default function AdminTracker() {
         <select value={filterType} onChange={e => setFilterType(e.target.value)}
           className="bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold text-gray-700 focus:outline-none shadow-sm">
           <option value="ALL">All Modules</option>
-          {["MIS Sanity", "MIS", "CS Tracker", "Approval Tracker"].map(t => <option key={t} value={t}>{t}</option>)}
+          {["MIS Sanity", "MIS", "CS Tracker", "Approval Tracker", "Cost Analysis"].map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
