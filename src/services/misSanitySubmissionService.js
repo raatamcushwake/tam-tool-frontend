@@ -168,7 +168,7 @@ export const managerRejectSanity = async (projectId, monthYear, email, comment) 
 const getStoragePath = async (projectId) => {
   const snap = await getDoc(doc(db, "projects", projectId));
   const name = snap.data()?.projectName || snap.data()?.name || projectId;
-  return name.trim().replace(/\s+/g, '_');
+  return name.trim();
 };
 
 export const uploadFrozenSanityFile = async (projectId, monthYear, file, projectName) => {
