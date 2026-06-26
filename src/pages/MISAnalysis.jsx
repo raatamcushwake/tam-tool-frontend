@@ -65,7 +65,7 @@ function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = 
 }
 
 const tabs = [
-  'All', 'New Bookings', 'Transfers', 'Anomaly', 'Name Corrections', 'Cancellations',
+  'All', 'New Bookings', 'Transfers', 'Resale / Anomaly', 'Name Corrections', 'Cancellations',
   'Agreement Value Change', 'Demand Raised Change', 'Amount Received Change',
   'O/S against Demand Value', 'O/S against Sale Value', 'Debtors Aging',
   'MSP Analysis'
@@ -591,6 +591,8 @@ else atMSP.push(entry);
   getNum(r["180 - 365 days"]) > 0 || 
   getNum(r["Greater than 365 days"]) > 0
 );
+    } else if (activeTab === 'Anomaly') {
+      data = data.filter(r => r.is_resale === true);
     } else if (statusMap[activeTab]) {
       data = data.filter(r => r.Status === statusMap[activeTab]);
     } else if (activeTab === 'O/S against Demand Value' && selectedAgingFilter) {
@@ -1780,7 +1782,7 @@ const planned = bpTargets.planned_collection;
         {[
           { label: 'New Bookings', value: extractedData.filter(r => r.Status === 'NEW').length, color: 'text-emerald-600', tab: 'New Bookings' },
           { label: 'Transfers', value: extractedData.filter(r => r.Status === 'TRANSFER').length, color: 'text-blue-500', tab: 'Transfers' },
-          { label: 'Anomaly', value: extractedData.filter(r => r.Status === 'ANOMALY').length, color: 'text-purple-600', tab: 'Anomaly' },
+          { label: 'Resale / Anomaly', value: extractedData.filter(r => r.is_resale === true).length, color: 'text-purple-600', tab: 'Anomaly' },
           { label: 'Name Corrections', value: extractedData.filter(r => r.Status === 'NAME_CORRECTION').length, color: 'text-pink-500', tab: 'Name Corrections' },
           { label: 'Cancellations', value: auditTotals.cancellations, color: 'text-red-500', tab: 'Cancellations' },
           { label: 'Demand ↑', value: '₹' + formatValue(auditTotals.demandIncrement), color: 'text-orange-500', tab: 'Demand Raised Change' },
