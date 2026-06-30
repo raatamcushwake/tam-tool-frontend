@@ -26,6 +26,7 @@ export const submitSanityForReview = async (projectId, monthYear, payload) => {
       makerProofDocuments: payload.makerProofDocuments || [],
       unitAnnotations: payload.unitAnnotations || {},
       currFileURL: payload.currFileURL || "",
+      prevFileURL: payload.prevFileURL || "",
       sanityCheckPassed: payload.sanityCheckPassed,
       issues: payload.issues || [],
       summary: payload.summary || {},
@@ -46,6 +47,7 @@ export const submitSanityForReview = async (projectId, monthYear, payload) => {
       approvedBy: "",
       approvedAt: null,
       rejectionComment: "",
+      analysisApproved: false,
     }, { merge: true });
     return { success: true };
   } catch (error) {
@@ -63,6 +65,18 @@ export const getSanitySubmission = async (projectId, monthYear) => {
     return { id: snap.id, ...snap.data() };
   } catch (error) {
     console.error("getSanitySubmission error:", error);
+    return null;
+  }
+};
+
+// Get approved sanity submission for a month — used by MIS Analysis to auto-load
+export const getApprovedSanityForMonth = async (projectId, monthYear) => {
+  try {
+    const sub = await getSanitySubmission(projectId, monthYear);
+    if (sub && sub.status === "APPROVED") return sub;
+    return null;
+  } catch (error) {
+    console.error("getApprovedSanityForMonth error:", error);
     return null;
   }
 };
