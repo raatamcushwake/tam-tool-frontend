@@ -12,6 +12,20 @@ export const STATUS_CONFIG = {
   REJECTED_BY_REVIEWER: { label: "Rejected by Reviewer", color: "bg-red-100 text-red-700 border-red-300" },
   REJECTED_BY_MANAGER: { label: "Rejected by Manager", color: "bg-red-100 text-red-700 border-red-300" },
 };
+// Mark that MIS Analysis has been completed for this sanity-approved month
+export const markSanityAnalysisApproved = async (projectId, monthYear) => {
+  try {
+    const docRef = doc(db, "projects", projectId, "misSanitySubmissions", monthYear);
+    await updateDoc(docRef, {
+      analysisApproved: true,
+      analysisApprovedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("markSanityAnalysisApproved error:", error);
+    return { success: false, error: error.message };
+  }
+};
 
 // Submit sanity for review (Maker)
 export const submitSanityForReview = async (projectId, monthYear, payload) => {
