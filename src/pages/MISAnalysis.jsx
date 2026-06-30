@@ -3,8 +3,7 @@ import { getInventoryData, getBusinessPlanData, getMSPData } from "../services/r
 import {
   submitMISForReview, getAllMISSubmissions, getLastApprovedMIS,
   reviewerApproveMIS, reviewerRejectMIS, managerApproveMIS, managerRejectMIS,
-  STATUS_CONFIG, uploadFrozenMISFile, getFrozenMISMetadata, downloadFrozenMISAsFile,
-  getMISSubmission
+  STATUS_CONFIG, getMISSubmission
 } from "../services/misSubmissionService";
 import Layout from "../components/common/Layout";
 import { useProject } from "../context/ProjectContext";
@@ -23,6 +22,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage, db } from "../services/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { getCycleState } from "../services/cycleStateService";
+import { getApprovedSanityForMonth, downloadFrozenSanityAsFile, uploadFrozenSanityFile, markSanityAnalysisApproved } from "../services/misSanitySubmissionService";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
   const inputRef = useRef(null);
@@ -135,9 +135,6 @@ useEffect(() => {
   const [monthYear, setMonthYear] = useState('');
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [mspData, setMspData] = useState(null);
-const [frozenMISMetadata, setFrozenMISMetadata] = useState(null);
-const [frozenFileLoading, setFrozenFileLoading] = useState(false);
-const [frozenFileLoaded, setFrozenFileLoaded] = useState(false);
 const [rowRemarks, setRowRemarks] = useState({});
 const [rowAttachments, setRowAttachments] = useState({});
 const [rowAttachmentURLs, setRowAttachmentURLs] = useState({});
@@ -181,22 +178,12 @@ useEffect(() => {
 useEffect(() => {
   const projectId = selectedProject?.projectId;
   if (!projectId || !isMaker) return;
-  getFrozenMISMetadata(projectId).then(meta => {
-    setFrozenMISMetadata(meta);
-    if (meta?.monthYear) {
-      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-      const parts = meta.monthYear.split('-');
-      const monIdx = months.indexOf(parts[0]?.toUpperCase()?.substring(0,3));
-      const year = parseInt(parts[1]);
-      if (monIdx !== -1 && !isNaN(year)) {
-        const nextMonIdx = (monIdx + 1) % 12;
-        const nextYear = monIdx === 11 ? year + 1 : year;
-        const nextMonth = `${months[nextMonIdx]}-${nextYear}`;
-        setMonthYear(nextMonth);
-      }
-    }
-  });
-}, [selectedProject, isMaker]);
+  // monthYear now derives from cycleStateData.cycleMonth (set inside autoRunAnalysis),
+  // not from a separately-uploaded frozenMIS metadata doc.
+  if (cycleStateData?.cycleMonth) {
+    setMonthYear(cycleStateData.cycleMonth);
+  }
+}, [selectedProject, isMaker, cycleStateData]);
 
   // Load all submissions for Reviewer/Manager
   useEffect(() => {
@@ -356,6 +343,31 @@ useEffect(() => {
     t.netAreaSold = t.actualAreaSold - t.cancelledAreaSold;
     return t;
   }, [extractedData]);
+
+  useEffect(() => {
+  if (!extractedData.length || !inventoryData?.rows) return;
+
+  const soldRows = extractedData.filter(r => r.Status !== 'CANCELLATION' && isUnitSold(r["Customer Name"]));
+
+  const inventoryTowerTypes = inventoryData.rows.map(row => ({
+    tower: String(row.tower || '').trim().toLowerCase(),
+    type: String(row.unitType || '').trim().toLowerCase(),
+  }));
+
+  const unmatched = soldRows.filter(r => {
+    const rTower = String(r["Tower"] || '').trim().toLowerCase();
+    const rType = String(r["Unit Type"] || '').trim().toLowerCase();
+    return !inventoryTowerTypes.some(inv => {
+      const typeMatches = inv.type === rType ||
+        (rType === 'shop' && inv.type === 'commercial') ||
+        (rType === 'commercial' && inv.type === 'shop');
+      return inv.tower === rTower && typeMatches;
+    });
+  });
+
+  console.log("=== INVENTORY MATCH DEBUG ===");
+  console.log("Sold rows not matched to any Inventory Sheet Tower/Type:", unmatched.length, unmatched);
+}, [extractedData, inventoryData]);
 
   const mspAnalysis = useMemo(() => {
     if (!mspData?.rates) return { belowMSP: [], atMSP: [], noMSP: [] };
@@ -581,6 +593,9 @@ else atMSP.push(entry);
   };
 }, [businessPlanData, monthYear]);
 
+  console.log("DEBUG monthYear:", monthYear);
+console.table(businessPlanData?.quarters);
+
   const processedData = useMemo(() => {
     let data = [...extractedData];
     if (activeTab === 'Debtors Aging') {
@@ -623,107 +638,118 @@ else atMSP.push(entry);
     }));
   };
 
-  const runComparison = async () => {
-  setIsProcessing(true);
-  setExtractedData([]);
-  try {
-    let prevFile = files.prev;
-
-    if (!prevFile && frozenMISMetadata) {
-      setFrozenFileLoading(true);
-      const result = await downloadFrozenMISAsFile(selectedProject.projectId);
-      setFrozenFileLoading(false);
-      if (!result.success) {
-        alert("Failed to load frozen previous month file from Firebase. Please upload manually.");
+  const autoRunAnalysis = async () => {
+    setIsProcessing(true);
+    setExtractedData([]);
+    try {
+      const cycleMonth = cycleStateData?.cycleMonth;
+      if (!cycleMonth) {
+        alert("No approved Sanity Check month found. Please contact Manager.");
         setIsProcessing(false);
         return;
       }
-      prevFile = result.file;
-      setFrozenFileLoaded(true);
-    }
+      setMonthYear(cycleMonth);
 
-    if (!prevFile || !files.curr) {
-      alert("Please upload both Previous and Current Month MIS");
-      setIsProcessing(false);
-      return;
-    }
+      const approvedSanity = await getApprovedSanityForMonth(selectedProject.projectId, cycleMonth);
+      if (!approvedSanity || !approvedSanity.currFileURL) {
+        alert("Could not find the approved Sanity submission's current month file. Please contact Manager/Reviewer.");
+        setIsProcessing(false);
+        return;
+      }
 
-    const formData = new FormData();
-    formData.append("prev_month", prevFile);
-    formData.append("curr_month", files.curr);
-
-    const res = await fetch(`${apiUrl}/api/mis-analysis/compare`, { method: "POST", body: formData });
-    const data = await res.json();
-
-    if (data.status === "success") {
-  const mspRates = mspData?.rates || [];
-  const enriched = (data.extracted_data || []).map(row => {
-    if (row.Status !== 'NEW' || !isUnitSold(row["Customer Name"])) return row;
-    const tower = String(row["Tower"] || '').trim().toLowerCase();
-    const unitType = String(row["Unit Type"] || '').trim().toLowerCase();
-    const ratePerSft = getNum(row["Rate per sft"]);
-    const unitNo = String(row["Unit No."] || '').trim().toLowerCase();
-    const unitLevelMatch = mspRates.find(m => String(m.unitNo || '').trim().toLowerCase() === unitNo);
-    let msp = 0;
-    if (unitLevelMatch) {
-      msp = unitLevelMatch.mspRate;
-    } else {
-      const matchingRates = mspRates.filter(m => {
-        const mTower = String(m.tower || '').trim().toLowerCase();
-        const mType = String(m.unitType || '').trim().toLowerCase();
-        const typeMatches = mType === unitType ||
-          (unitType === 'shop' && mType === 'commercial') ||
-          (unitType === 'commercial' && mType === 'shop');
-        const towerMatches = mTower === tower || mTower.startsWith(tower);
-        return towerMatches && typeMatches;
-      });
-      if (matchingRates.length > 0) msp = Math.max(...matchingRates.map(m => m.mspRate));
-    }
-    const variance = msp > 0 ? ratePerSft - msp : 0;
-    const mspFlag = msp === 0 ? 'NO MSP' : variance < 0 ? 'BELOW MSP' : 'AT/ABOVE MSP';
-    return { ...row, MSP_Rate: msp, MSP_Variance: variance, MSP_Flag: mspFlag };
-  });
-  setExtractedData(enriched);
-      setUnitStats({ total: data.total_unit_count, sold: data.sold_units, unsold: data.unsold_units });
-      setActiveTab('All');
-      if (enriched?.length > 0) {
-  const cols = {};
-  const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
-    'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-    'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
-  
-  // Collect ALL keys from ALL rows so MSP fields from NEW rows are included
-  const allKeys = new Set();
-  enriched.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
-  allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
-  
-  setVisibleColumns(cols);
+      if (!approvedSanity.prevFileURL) {
+  alert("Approved Sanity submission is missing its previous-month file reference. Please re-run Sanity Check.");
+  setIsProcessing(false);
+  return;
 }
+
+const prevRes = await fetch(approvedSanity.prevFileURL);
+const prevBlob = await prevRes.blob();
+const prevFile = new File([prevBlob], `prev_${cycleMonth}.xlsx`, {
+  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+});
+
+const currRes = await fetch(approvedSanity.currFileURL);
+const currBlob = await currRes.blob();
+const currFile = new File([currBlob], `${cycleMonth}.xlsx`, {
+  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+});
+      console.log("PREV FILE:", prevFile.name, prevFile.size);
+      console.log("CURR FILE:", currFile.name, currFile.size);
+      console.log("Same file size?", prevFile.size === currFile.size);
+
+      const formData = new FormData();
+      formData.append("prev_month", prevFile);
+      formData.append("curr_month", currFile);
+
+      const res = await fetch(`${apiUrl}/api/mis-analysis/compare`, { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (data.status === "success") {
+        const mspRates = mspData?.rates || [];
+        const enriched = (data.extracted_data || []).map(row => {
+          if (row.Status !== 'NEW' || !isUnitSold(row["Customer Name"])) return row;
+          const tower = String(row["Tower"] || '').trim().toLowerCase();
+          const unitType = String(row["Unit Type"] || '').trim().toLowerCase();
+          const ratePerSft = getNum(row["Rate per sft"]);
+          const unitNo = String(row["Unit No."] || '').trim().toLowerCase();
+          const unitLevelMatch = mspRates.find(m => String(m.unitNo || '').trim().toLowerCase() === unitNo);
+          let msp = 0;
+          if (unitLevelMatch) {
+            msp = unitLevelMatch.mspRate;
+          } else {
+            const matchingRates = mspRates.filter(m => {
+              const mTower = String(m.tower || '').trim().toLowerCase();
+              const mType = String(m.unitType || '').trim().toLowerCase();
+              const typeMatches = mType === unitType ||
+                (unitType === 'shop' && mType === 'commercial') ||
+                (unitType === 'commercial' && mType === 'shop');
+              const towerMatches = mTower === tower || mTower.startsWith(tower);
+              return towerMatches && typeMatches;
+            });
+            if (matchingRates.length > 0) msp = Math.max(...matchingRates.map(m => m.mspRate));
+          }
+          const variance = msp > 0 ? ratePerSft - msp : 0;
+          const mspFlag = msp === 0 ? 'NO MSP' : variance < 0 ? 'BELOW MSP' : 'AT/ABOVE MSP';
+          return { ...row, MSP_Rate: msp, MSP_Variance: variance, MSP_Flag: mspFlag };
+        });
+        setExtractedData(enriched);
+        setUnitStats({ total: data.total_unit_count, sold: data.sold_units, unsold: data.unsold_units });
+        setActiveTab('All');
+        if (enriched?.length > 0) {
+          const cols = {};
+          const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
+            'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
+            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+          const allKeys = new Set();
+          enriched.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+          allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+          setVisibleColumns(cols);
+        }
+      } else {
+        alert('Error during comparison: ' + (data.message || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error during comparison: ' + err.message);
+    } finally {
+      setIsProcessing(false);
     }
-  } catch (err) {
-    console.error(err);
-    alert('Error during comparison: ' + err.message);
-  } finally {
-    setIsProcessing(false);
-    setFrozenFileLoading(false);
-  }
-};
+  };
 
   const handleSubmitForReview = async () => {
     if (!monthYear) { alert('Please enter Current Month & Year before submitting'); return; }
-    if (!extractedData.length) { alert('Please run comparison first'); return; }
+    if (!extractedData.length) { alert('Please run analysis first'); return; }
     setActionLoading(true);
-    // Upload current month file to Storage first
-let currFileURL = "";
-try {
-  const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/pendingMIS/${monthYear}.xlsx`);
-  await uploadBytes(uploadRef, files.curr, {
-    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  currFileURL = await getDownloadURL(uploadRef);
-} catch (uploadErr) {
-  console.error("File upload error:", uploadErr);
-}
+    // Curr file already lives in the approved Sanity submission's storage —
+    // just reuse that URL instead of re-uploading a file we no longer hold locally.
+    let currFileURL = "";
+    try {
+      const approvedSanity = await getApprovedSanityForMonth(selectedProject.projectId, monthYear);
+      currFileURL = approvedSanity?.currFileURL || "";
+    } catch (uploadErr) {
+      console.error("Fetching sanity currFileURL error:", uploadErr);
+    }
 
 const enrichedWithRemarks = extractedData.map(row => ({
   ...row,
@@ -745,8 +771,6 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     if (result.success) {
       setCurrentSubmissionStatus('PENDING_REVIEW');
       makerCommentRef.current = '';
-      localStorage.setItem("misSubmitted", JSON.stringify(true));
-      window.dispatchEvent(new Event("storage"));
       alert('✅ Submitted for Review successfully!');
     } else {
       alert('Error submitting: ' + result.error);
@@ -793,23 +817,31 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       );
 
       if (submissionDoc?.currFileURL) {
-        // If Maker uploaded and we stored the URL
         const response = await fetch(submissionDoc.currFileURL);
         const blob = await response.blob();
         const file = new File([blob], `${selectedSubmission.monthYear}.xlsx`, {
           type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
-        await uploadFrozenMISFile(
+        // Freeze into the single frozenSanityMIS lineage (replaces old frozenMIS store)
+        await uploadFrozenSanityFile(
           selectedProject.projectId,
           selectedSubmission.monthYear,
-          file
+          file,
+          selectedProject.projectName
         );
       }
     } catch (storageErr) {
-      console.error("Storage upload error:", storageErr);
-    }
+        console.error("Storage upload error:", storageErr);
+      }
 
-    // Lock MIS Analysis again — write to Firestore
+      // Now that MIS Analysis is fully approved, freeze the Sanity submission for this month
+      try {
+        await markSanityAnalysisApproved(selectedProject.projectId, selectedSubmission.monthYear);
+      } catch (e) {
+        console.error("markSanityAnalysisApproved error:", e);
+      }
+
+      // Lock MIS Analysis again — write to Firestore
 const { setCycleState } = await import("../services/cycleStateService");
 await setCycleState(selectedProject.projectId, {
   sanityApproved: false,
@@ -849,7 +881,7 @@ alert('✅ Final Approved! Month is now frozen. MIS Analysis is now locked for n
       const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ Info: "No records" }]);
       XLSX.utils.book_append_sheet(wb, ws, name);
     });
-    XLSX.writeFile(wb, `MIS_Analysis_${files.curr?.name?.replace(/\.[^/.]+$/, "") || "Result"}.xlsx`);
+    XLSX.writeFile(wb, `MIS_Analysis_${monthYear || "Result"}.xlsx`);
   };
 
 
@@ -1500,8 +1532,7 @@ return (
     </div>
   );
 
-  // Sanity Gate
-  const misSubmittedLocal = (() => { try { return JSON.parse(localStorage.getItem("misSubmitted")) || false; } catch { return false; } })();
+  // Sanity Gate — purely driven by Firestore cycle state now (no localStorage bypass)
 
 if (isMaker && cycleLoading) {
   return (
@@ -1516,7 +1547,7 @@ if (isMaker && cycleLoading) {
 const isMisLocked = isMaker && (
   !cycleStateData?.sanityApproved ||
   cycleStateData?.misAnalysisLocked === true
-) && !misSubmittedLocal;
+);
 
 if (isMisLocked) {
   return (
@@ -2297,43 +2328,21 @@ const planned = bpTargets.planned_collection;
             </div>
           )}
 
-          {/* Upload */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-  {/* Previous Month — show frozen info OR upload box */}
-  <div>
-    <p className="text-sm font-semibold text-gray-600 mb-2">Previous Month MIS</p>
-    {frozenMISMetadata ? (
-      <div className="border-2 border-dashed border-green-400 bg-green-50 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
-        <CheckCircle size={40} className="text-green-500 mb-3" />
-        <p className="text-green-700 font-bold text-sm">Auto-loaded from Frozen MIS</p>
-        <p className="text-green-600 font-semibold text-xs mt-1">{frozenMISMetadata.monthYear}.xlsx</p>
-        <p className="text-gray-400 text-xs mt-2">
-          Frozen on: {new Date(frozenMISMetadata.frozenAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-        </p>
-        {frozenFileLoading && (
-          <p className="text-blue-500 text-xs mt-2 font-bold animate-pulse">Downloading from Firebase...</p>
-        )}
-        {frozenFileLoaded && (
-          <p className="text-emerald-600 text-xs mt-2 font-bold">✓ Downloaded & Ready</p>
-        )}
-      </div>
-    ) : (
-      <FileUploadBox label="Upload Previous Sheet" subtitle="Last month's MIS Excel file"
-        file={files.prev} accent="blue"
-        onFileSelect={(f) => setFiles(p => ({ ...p, prev: f }))}
-        onClear={() => setFiles(p => ({ ...p, prev: null }))} />
-    )}
-  </div>
-
-  {/* Current Month — always upload */}
-  <div>
-    <p className="text-sm font-semibold text-gray-600 mb-2">Current Month MIS</p>
-    <FileUploadBox label="Upload Current Sheet" subtitle="This month's MIS Excel file"
-      file={files.curr} accent="indigo"
-      onFileSelect={(f) => setFiles(p => ({ ...p, curr: f }))}
-      onClear={() => setFiles(p => ({ ...p, curr: null }))} />
-  </div>
-</div>
+          {/* Auto-loaded month banner */}
+          <div className="bg-white p-5 rounded-2xl border border-blue-200 shadow-sm mb-6 flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center shrink-0">
+              <FileSpreadsheet size={22} className="text-blue-600" />
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-widest text-gray-400">Sanity-Approved Month Ready For Analysis</p>
+              <p className="text-lg font-black text-gray-900">
+                {cycleStateData?.cycleMonth || "No approved month found"}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Files are auto-loaded from the approved Sanity Check submission — no upload needed.
+              </p>
+            </div>
+          </div>
 
           {currentSubmissionStatus === 'APPROVED' && (
             <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-center gap-3">
@@ -2348,12 +2357,12 @@ const planned = bpTargets.planned_collection;
 
           
           <div className="flex justify-center mb-8">
-            <button onClick={runComparison} disabled={(!files.prev && !frozenMISMetadata) || !files.curr || isProcessing || currentSubmissionStatus === 'APPROVED'}
+            <button onClick={autoRunAnalysis} disabled={!cycleStateData?.cycleMonth || isProcessing || currentSubmissionStatus === 'APPROVED'}
   className={`flex items-center gap-3 px-10 py-3.5 rounded-xl font-bold text-sm transition-all
-    ${(files.prev || frozenMISMetadata) && files.curr && !isProcessing && currentSubmissionStatus !== 'APPROVED'
+    ${cycleStateData?.cycleMonth && !isProcessing && currentSubmissionStatus !== 'APPROVED'
       ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200 hover:scale-105 active:scale-95"
       : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}>
-              {isProcessing ? "Analyzing..." : "Compare & Extract Delta"}
+              {isProcessing ? `Analyzing ${cycleStateData?.cycleMonth || ""}...` : `Analyze ${cycleStateData?.cycleMonth || ""}`}
               <ArrowRight size={18} />
             </button>
           </div>
