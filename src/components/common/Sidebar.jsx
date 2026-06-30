@@ -49,39 +49,31 @@ const isMaker = currentRole === "MAKER";
     }
   });
 
-  const [misSubmitted, setMisSubmitted] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("misSubmitted")) || false;
-    } catch {
-      return false;
-    }
-  });
-
   useEffect(() => {
     const handleStorageChange = () => {
       try {
         setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false);
-        setMisSubmitted(JSON.parse(localStorage.getItem("misSubmitted")) || false);
       } catch {
         setSanityPassed(false);
-        setMisSubmitted(false);
       }
     };
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
+  const [cycleStateData, setCycleStateData] = useState(null);
+
   useEffect(() => {
-  if (!selectedProject?.projectId || !isMaker) return;
-  getCycleState(selectedProject.projectId).then(state => {
-    if (state?.sanityApproved && !state?.misAnalysisLocked) {
-      localStorage.setItem("sanityPassed", JSON.stringify(true));
-    } else {
-      localStorage.setItem("sanityPassed", JSON.stringify(false));
-    }
-    setSanityPassed(state?.sanityApproved && !state?.misAnalysisLocked ? true : false);
-  });
-}, [selectedProject, isMaker]);
+    if (!selectedProject?.projectId || !isMaker) return;
+    getCycleState(selectedProject.projectId).then(state => {
+      setCycleStateData(state);
+      const unlocked = !!(state?.sanityApproved && !state?.misAnalysisLocked);
+      setSanityPassed(unlocked);
+      // Keep localStorage in sync only as a cache for instant reads elsewhere —
+      // cycleStateData/Firestore remains the source of truth.
+      localStorage.setItem("sanityPassed", JSON.stringify(unlocked));
+    });
+  }, [selectedProject, isMaker]);
 
   const handleLogout = async () => {
   localStorage.removeItem("sanityPassed");
@@ -131,7 +123,7 @@ const isMaker = currentRole === "MAKER";
         <ul className="space-y-1">
           {!isAdmin && navItems.map((item) => {
             const isMisAnalysis = item.path === "/mis-analysis";
-            const isLocked = isMisAnalysis && isMaker && !sanityPassed && !misSubmitted && !isAdmin;
+            const isLocked = isMisAnalysis && isMaker && !sanityPassed && !isAdmin;
 
             return (
               <li key={item.path}>
