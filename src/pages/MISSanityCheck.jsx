@@ -127,6 +127,7 @@ export default function MISSanityCheck() {
   const [frozenFileLoading, setFrozenFileLoading] = useState(false);
   const [frozenFileLoaded, setFrozenFileLoaded] = useState(false);
   const [rejectionInfo, setRejectionInfo] = useState(null);
+  const [analysisApproved, setAnalysisApproved] = useState(false);
 
   const makerCommentRef = useRef("");
   const reviewerCommentRef = useRef("");
@@ -240,6 +241,7 @@ return () => clearInterval(interval);
     getSanitySubmission(projectId, monthYear).then(data => {
   if (data) {
     setCurrentSubmissionStatus(data.status);
+    setAnalysisApproved(data.analysisApproved || false);
     setRejectionInfo({
       rejectionComment: data.rejectionComment || "",
       reviewerComment: data.reviewerComment || "",
@@ -248,6 +250,7 @@ return () => clearInterval(interval);
     });
   } else {
     setCurrentSubmissionStatus(null);
+    setAnalysisApproved(false);
     setRejectionInfo(null);
   }
 });
@@ -307,39 +310,8 @@ return () => clearInterval(interval);
       }
       setResults(data);
 
-      // PASSED → unlock immediately, no approval needed
-      // FAILED → lock, needs Manager approval via workflow
-      if (data.sanity_check_passed) {
-  localStorage.setItem("sanityPassed", JSON.stringify(true));
-  window.dispatchEvent(new Event("storage"));
-
-  // ✅ Write to Firestore so lock state works across devices
-  const { setCycleState } = await import("../services/cycleStateService");
-  await setCycleState(selectedProject.projectId, {
-    sanityApproved: true,
-    misAnalysisLocked: false,
-    cycleMonth: monthYear,
-    sanityPassedAt: new Date().toISOString(),
-    misApprovedAt: null,
-  });
-
-  // Freeze the current month MIS file as Sanity frozen file
-  if (files.curr && monthYear) {
-    try {
-      await uploadFrozenSanityFile(
-              selectedProject.projectId,
-              monthYear,
-              files.curr,
-              selectedProject.projectName
-            );
-          } catch (freezeErr) {
-            console.error("Failed to freeze sanity file:", freezeErr);
-          }
-        }
-      } else {
-        localStorage.setItem("sanityPassed", JSON.stringify(false));
-        window.dispatchEvent(new Event("storage"));
-      }
+      // Every run — pass or fail — now requires Reviewer → Manager approval.
+      // No cycle state writes here; that only happens in managerApproveSanity.
     } catch (err) {
       console.error(err);
       alert("Error: " + err.message);
@@ -364,6 +336,22 @@ return () => clearInterval(interval);
     } catch (uploadErr) {
       console.error("File upload error:", uploadErr);
     }
+    let prevFileURL = "";
+try {
+  if (frozenMISMetadata?.downloadURL) {
+    // Not first cycle — prev came from last month's frozen file
+    prevFileURL = frozenMISMetadata.downloadURL;
+  } else if (files.prev) {
+    // First cycle — Maker manually uploaded prev, upload it to storage too
+    const prevUploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/pendingSanityMIS/${monthYear}_prev.xlsx`);
+    await uploadBytes(prevUploadRef, files.prev, {
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    prevFileURL = await getDownloadURL(prevUploadRef);
+  }
+} catch (uploadErr) {
+  console.error("Prev file upload error:", uploadErr);
+}
 
     // Upload proof documents if any
     // Upload overall proof documents if any
@@ -401,6 +389,7 @@ return () => clearInterval(interval);
       makerProofDocuments,
       unitAnnotations,
       currFileURL,
+      prevFileURL,
       sanityCheckPassed: results.sanity_check_passed,
       issues: results.issues || [],
       summary: results.summary || {},
@@ -1045,7 +1034,7 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
           </div>
 
           {/* Approved & frozen notice */}
-          {currentSubmissionStatus === 'APPROVED' && (
+          {analysisApproved && (
             <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-center gap-3">
               <Lock size={16} className="text-green-600" />
               <div>
@@ -1111,9 +1100,9 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
           <div className="flex justify-center mb-8">
             <button
               onClick={runSanityCheck}
-              disabled={(!files.prev && !frozenMISMetadata) || !files.curr || isProcessing || currentSubmissionStatus === 'APPROVED'}
+              disabled={(!files.prev && !frozenMISMetadata) || !files.curr || isProcessing || analysisApproved}
               className={`flex items-center gap-3 px-10 py-3.5 rounded-xl font-bold text-sm transition-all
-                ${(files.prev || frozenMISMetadata) && files.curr && !isProcessing && currentSubmissionStatus !== 'APPROVED'
+                ${(files.prev || frozenMISMetadata) && files.curr && !isProcessing && !analysisApproved
                   ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200 hover:scale-105 active:scale-95"
                   : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}>
               {isProcessing ? "Analyzing Data..." : "Run Sanity Check"}
@@ -1135,25 +1124,14 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
           {/* Results section */}
           {results && results.status !== "error" && (
             <>
-              {/* ── PASSED: show unlock banner, no submit needed ── */}
-              {results.sanity_check_passed && (
-                <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3">
-                  <CheckCircle size={20} className="text-emerald-600 shrink-0" />
-                  <div>
-                    <p className="text-emerald-700 font-bold text-sm">✅ MIS Analysis is now unlocked!</p>
-                    <p className="text-emerald-500 text-xs mt-0.5">
-                      Sanity passed — you can proceed directly to MIS Analysis. No approval workflow needed.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* ── FAILED: show submit for review panel ── */}
-              {!results.sanity_check_passed && currentSubmissionStatus !== 'APPROVED' && (
-                <div className="bg-white border border-red-200 rounded-2xl p-5 shadow-sm mb-6">
+              {/* ── Submit for review panel — shown for both pass and fail ── */}
+              {!analysisApproved && (
+                <div className={`bg-white border rounded-2xl p-5 shadow-sm mb-6 ${results.sanity_check_passed ? 'border-emerald-200' : 'border-red-200'}`}>
                   <div className="flex items-center gap-2 mb-3">
-                    <Send size={16} className="text-red-500" />
-                    <p className="text-sm font-black uppercase text-red-500">Submit Failed Sanity for Review</p>
+                    <Send size={16} className={results.sanity_check_passed ? "text-emerald-500" : "text-red-500"} />
+                    <p className={`text-sm font-black uppercase ${results.sanity_check_passed ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {results.sanity_check_passed ? 'Sanity Check Passed — Send for Review' : 'Submit Failed Sanity for Review'}
+                    </p>
                     {currentSubmissionStatus && (
                       <span className={`ml-auto text-xs font-black px-3 py-1 rounded-full border ${STATUS_CONFIG[currentSubmissionStatus]?.color}`}>
                         {STATUS_CONFIG[currentSubmissionStatus]?.label}
@@ -1162,8 +1140,10 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                   </div>
                   <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                     <p className="text-xs font-bold text-amber-700">
-                      ⚠ Sanity check failed. Submit to Reviewer with your explanation.
-                      MIS Analysis will remain locked until Manager gives final approval.
+                      {results.sanity_check_passed
+                        ? "✓ Sanity passed. Still needs Reviewer and Manager approval before MIS Analysis unlocks."
+                        : "⚠ Sanity check failed. Submit to Reviewer with your explanation."}
+                      {" "}MIS Analysis will remain locked until Manager gives final approval.
                     </p>
                   </div>
                   {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
@@ -1177,7 +1157,7 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                     <textarea
                       defaultValue=""
                       onChange={e => { makerCommentRef.current = e.target.value; }}
-                      placeholder="Explain the issues to the Reviewer (optional)..."
+                      placeholder={results.sanity_check_passed ? "Add a comment for the Reviewer (optional)..." : "Explain the issues to the Reviewer (optional)..."}
                       className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:outline-none focus:border-blue-400 resize-none"
                       rows={3}
                       disabled={currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER'}
@@ -1189,12 +1169,14 @@ alert('✅ Final Approved! Sanity is now frozen. MIS Analysis is unlocked for th
                     className={`w-full font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm
                       ${(!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER')
                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        : 'bg-red-500 hover:bg-red-600 text-white'}`}>
+                        : results.sanity_check_passed
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-red-500 hover:bg-red-600 text-white'}`}>
                     {actionLoading ? 'Submitting...' :
  currentSubmissionStatus === 'PENDING_REVIEW' ? '⏳ Awaiting Review' :
  currentSubmissionStatus === 'PENDING_MANAGER' ? '⏳ Awaiting Manager Approval' :
  currentSubmissionStatus === 'REJECTED_BY_MANAGER' ? '⏳ Awaiting Reviewer Action' :
- <><Send size={14} /> Submit Failed Sanity for Review</>}
+ <><Send size={14} /> {results.sanity_check_passed ? 'Sanity Check Passed — Send for Review' : 'Submit Failed Sanity for Review'}</>}
                   </button>
                 </div>
               )}
