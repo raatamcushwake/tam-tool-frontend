@@ -128,6 +128,8 @@ export default function MISSanityCheck() {
   const [frozenFileLoaded, setFrozenFileLoaded] = useState(false);
   const [rejectionInfo, setRejectionInfo] = useState(null);
   const [analysisApproved, setAnalysisApproved] = useState(false);
+  const [resolvedPrevFile, setResolvedPrevFile] = useState(null);
+  const [passConfirmed, setPassConfirmed] = useState(false);
   const [submissionSanityPassed, setSubmissionSanityPassed] = useState(null);
 
   const makerCommentRef = useRef("");
@@ -250,6 +252,7 @@ return () => clearInterval(interval);
     const projectId = selectedProject?.projectId;
     const projectName = selectedProject?.projectName || selectedProject?.projectId;
     if (!projectId || !monthYear || !isMaker) return;
+    setPassConfirmed(false);
     getSanitySubmission(projectId, monthYear).then(data => {
   if (data) {
     setCurrentSubmissionStatus(data.status);
@@ -290,6 +293,7 @@ return () => clearInterval(interval);
     setIsProcessing(true);
     setResults(null);
     setSelectedSubmission(null);
+    setPassConfirmed(false);
     try {
       let prevFile = files.prev;
 
@@ -312,6 +316,8 @@ return () => clearInterval(interval);
         return;
       }
 
+      setResolvedPrevFile(prevFile);
+
       const formData = new FormData();
       formData.append("prev_month", prevFile);
       formData.append("curr_month", files.curr);
@@ -323,47 +329,8 @@ return () => clearInterval(interval);
         return;
       }
       setResults(data);
-
-      // A fresh sanity run means any earlier submission for this month is now stale —
-      // reset local submission state so the Maker sees a clean "Submit" action,
-      // not a disabled "already submitted" button carried over from the last run.
-      setCurrentSubmissionStatus(null);
-      setSubmissionSanityPassed(null);
-      setRejectionInfo(null);
-
-      // Stage the files immediately so Analysis can use them right away —
-      // it no longer waits for the Sanity submission to be approved.
-      let stagedCurrURL = "";
-      let stagedPrevURL = "";
-      try {
-        const currRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/stagingMIS/${monthYear}_curr.xlsx`);
-        await uploadBytes(currRef, files.curr, {
-          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-        stagedCurrURL = await getDownloadURL(currRef);
-
-        if (frozenMISMetadata?.downloadURL) {
-          stagedPrevURL = frozenMISMetadata.downloadURL;
-        } else if (prevFile) {
-          const prevLabel = getPrevMonthLabel(monthYear) || `${monthYear}_prev`;
-          const prevRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/stagingMIS/${prevLabel}.xlsx`);
-          await uploadBytes(prevRef, prevFile, {
-            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          });
-          stagedPrevURL = await getDownloadURL(prevRef);
-        }
-      } catch (stageErr) {
-        console.error("Staging upload error:", stageErr);
-      }
-
-      const { setCycleState } = await import("../services/cycleStateService");
-      await setCycleState(selectedProject.projectId, {
-        cycleMonth: monthYear,
-        analysisUnlocked: true,
-        sanityCheckPassed: data.sanity_check_passed,
-        stagedCurrURL,
-        stagedPrevURL,
-      });
+      // NOTE: MIS Analysis is intentionally NOT unlocked here.
+      // Maker must click a Submit button (pass or fail) before cycleState is set.
     } catch (err) {
       console.error(err);
       alert("Error: " + err.message);
@@ -373,6 +340,49 @@ return () => clearInterval(interval);
     }
   };
 
+  // Called when Sanity Check PASSED — Maker explicitly submits to unlock Analysis
+  const confirmAndUnlockAnalysis = async () => {
+    if (!results || results.status === "error") return;
+    setActionLoading(true);
+    try {
+      let stagedCurrURL = "";
+      let stagedPrevURL = "";
+
+      const currRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/stagingMIS/${monthYear}_curr.xlsx`);
+      await uploadBytes(currRef, files.curr, {
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      stagedCurrURL = await getDownloadURL(currRef);
+
+      if (frozenMISMetadata?.downloadURL) {
+        stagedPrevURL = frozenMISMetadata.downloadURL;
+      } else if (resolvedPrevFile) {
+        const prevLabel = getPrevMonthLabel(monthYear) || `${monthYear}_prev`;
+        const prevRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/stagingMIS/${prevLabel}.xlsx`);
+        await uploadBytes(prevRef, resolvedPrevFile, {
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+        stagedPrevURL = await getDownloadURL(prevRef);
+      }
+
+      const { setCycleState } = await import("../services/cycleStateService");
+      await setCycleState(selectedProject.projectId, {
+        cycleMonth: monthYear,
+        analysisUnlocked: true,
+        sanityCheckPassed: true,
+        stagedCurrURL,
+        stagedPrevURL,
+      });
+
+      setPassConfirmed(true);
+      alert(`✅ Submitted! MIS Analysis is now unlocked for ${monthYear}.`);
+    } catch (err) {
+      console.error(err);
+      alert("Error submitting: " + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
   const handleSubmitForReview = async () => {
     if (!monthYear) { alert('Please enter Current Month & Year before submitting'); return; }
     if (!results || results.status === 'error') { alert('Please run sanity check first'); return; }
@@ -458,8 +468,13 @@ try {
     });
 
     if (result.success) {
+      const { setCycleState } = await import("../services/cycleStateService");
+      await setCycleState(selectedProject.projectId, {
+        cycleMonth: monthYear,
+        analysisUnlocked: true,
+        sanityCheckPassed: results.sanity_check_passed,
+      });
       setCurrentSubmissionStatus('PENDING_REVIEW');
-      setSubmissionSanityPassed(results.sanity_check_passed);
       makerCommentRef.current = '';
       setUnitRemarks({});
       setUnitDocs({});
@@ -796,7 +811,7 @@ alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis w
           </div>
           <div>
             <h3 className="text-base font-bold text-emerald-700">✓ Sanity Check Passed</h3>
-            <p className="text-emerald-600 text-sm">No critical issues detected. MIS Analysis is unlocked.</p>
+            <p className="text-emerald-600 text-sm">No critical issues detected.</p>
           </div>
         </div>
       ) : (
@@ -1275,6 +1290,34 @@ alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis w
           {results && results.status !== "error" && (
             <>
               {/* ── Submit for review panel — FAILED sanity: requires remark/attachment ── */}
+              {!analysisApproved && results.sanity_check_passed && !passConfirmed && (
+                <div className="bg-white border rounded-2xl p-5 shadow-sm mb-6 border-emerald-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Send size={16} className="text-emerald-600" />
+                    <p className="text-sm font-black uppercase text-emerald-600">Submit Sanity Check</p>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">
+                    No critical issues found for {monthYear}. Click below to submit and unlock MIS Analysis.
+                  </p>
+                  <button
+                    onClick={confirmAndUnlockAnalysis}
+                    disabled={actionLoading}
+                    className="w-full font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {actionLoading ? 'Submitting...' : <><Send size={14} /> Submit &amp; Unlock MIS Analysis</>}
+                  </button>
+                </div>
+              )}
+
+              {passConfirmed && (
+                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-center gap-3">
+                  <Lock size={16} className="text-green-600" />
+                  <div>
+                    <p className="text-green-700 font-bold text-sm">{monthYear} submitted</p>
+                    <p className="text-green-500 text-xs mt-0.5">MIS Analysis is now unlocked for this month.</p>
+                  </div>
+                </div>
+              )}
+
               {!analysisApproved && !results.sanity_check_passed && (
                 <div className="bg-white border rounded-2xl p-5 shadow-sm mb-6 border-red-200">
                   <div className="flex items-center gap-2 mb-3">
