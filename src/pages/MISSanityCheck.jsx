@@ -1289,35 +1289,6 @@ alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis w
           {/* Results section */}
           {results && results.status !== "error" && (
             <>
-              {/* ── Submit for review panel — FAILED sanity: requires remark/attachment ── */}
-              {!analysisApproved && results.sanity_check_passed && !passConfirmed && (
-                <div className="bg-white border rounded-2xl p-5 shadow-sm mb-6 border-emerald-200">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Send size={16} className="text-emerald-600" />
-                    <p className="text-sm font-black uppercase text-emerald-600">Submit Sanity Check</p>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-3">
-                    No critical issues found for {monthYear}. Click below to submit and unlock MIS Analysis.
-                  </p>
-                  <button
-                    onClick={confirmAndUnlockAnalysis}
-                    disabled={actionLoading}
-                    className="w-full font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white">
-                    {actionLoading ? 'Submitting...' : <><Send size={14} /> Submit &amp; Unlock MIS Analysis</>}
-                  </button>
-                </div>
-              )}
-
-              {passConfirmed && (
-                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-center gap-3">
-                  <Lock size={16} className="text-green-600" />
-                  <div>
-                    <p className="text-green-700 font-bold text-sm">{monthYear} submitted</p>
-                    <p className="text-green-500 text-xs mt-0.5">MIS Analysis is now unlocked for this month.</p>
-                  </div>
-                </div>
-              )}
-
               {!analysisApproved && !results.sanity_check_passed && (
                 <div className="bg-white border rounded-2xl p-5 shadow-sm mb-6 border-red-200">
                   <div className="flex items-center gap-2 mb-3">
