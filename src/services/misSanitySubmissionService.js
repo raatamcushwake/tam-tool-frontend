@@ -16,10 +16,13 @@ export const STATUS_CONFIG = {
 export const markSanityAnalysisApproved = async (projectId, monthYear) => {
   try {
     const docRef = doc(db, "projects", projectId, "misSanitySubmissions", monthYear);
-    await updateDoc(docRef, {
+    await setDoc(docRef, {
+      monthYear,
+      status: "APPROVED",
+      sanityCheckPassed: true,
       analysisApproved: true,
       analysisApprovedAt: serverTimestamp(),
-    });
+    }, { merge: true });
     return { success: true };
   } catch (error) {
     console.error("markSanityAnalysisApproved error:", error);
@@ -94,6 +97,16 @@ export const getApprovedSanityForMonth = async (projectId, monthYear) => {
     return null;
   }
 };
+// Analysis no longer waits for Sanity approval — it just needs the
+// submission (and its file URLs) to exist for that month, any status.
+export const getSanityForAnalysis = async (projectId, monthYear) => {
+  try {
+    return await getSanitySubmission(projectId, monthYear);
+  } catch (error) {
+    console.error("getSanityForAnalysis error:", error);
+    return null;
+  }
+};
 
 // Get all submissions
 export const getAllSanitySubmissions = async (projectId) => {
@@ -158,17 +171,9 @@ export const managerApproveSanity = async (projectId, monthYear, email, comment)
       approvedAt: serverTimestamp(),
       sanityFrozen: true,
     });
-
-    // ✅ Write cycle state to Firestore — MIS Analysis now unlocked
-    const { setCycleState } = await import("./cycleStateService");
-    await setCycleState(projectId, {
-      sanityApproved: true,
-      misAnalysisLocked: false,
-      cycleMonth: monthYear,
-      sanityApprovedAt: new Date().toISOString(),
-      misApprovedAt: null,
-    });
-
+    // Sanity's approval chain is now a record-keeping track only.
+    // It no longer writes cycleState / unlocks Analysis — Analysis unlocks
+    // the moment the check is *run* (see MISSanityCheck.jsx runSanityCheck).
     return { success: true };
   } catch (error) {
     console.error("managerApproveSanity error:", error);
