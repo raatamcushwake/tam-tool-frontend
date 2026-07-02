@@ -1356,7 +1356,7 @@ alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis w
                   </div>
                   <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
                     <p className="text-xs font-bold text-emerald-700">
-                      ✓ Sanity check passed — MIS Analysis is already unlocked. Submitting this just creates a visible record for the Reviewer and Manager; no action is required from them.
+                      ✓ Sanity check passed. Submit to unlock the MIS Analysis for {monthYear} — this also creates a visible record for the Reviewer and Manager, though no action is required from them.
                     </p>
                   </div>
                   <div className="mb-3">
