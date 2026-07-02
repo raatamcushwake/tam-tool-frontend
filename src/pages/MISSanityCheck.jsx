@@ -1152,7 +1152,18 @@ alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis w
     {currentSubmissionStatus === 'REJECTED_BY_REVIEWER' && (
       <button
         type="button"
-        onClick={() => { setFiles(p => ({ ...p, curr: null })); setResults(null); }}
+        onClick={() => {
+          // Starting a revision — the old rejected submission is now stale.
+          // Clear the file so the box is ready for a fresh upload, and clear
+          // every piece of local state tied to the old submission so the UI
+          // doesn't keep showing the old rejected banner/status while the
+          // Maker is preparing the new one.
+          setFiles(p => ({ ...p, curr: null }));
+          setResults(null);
+          setCurrentSubmissionStatus(null);
+          setSubmissionSanityPassed(null);
+          setRejectionInfo(null);
+        }}
         className="mt-2 text-xs font-bold text-blue-600 underline">
         Upload a revised Current Month MIS instead →
       </button>
