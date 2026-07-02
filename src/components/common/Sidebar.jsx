@@ -39,47 +39,18 @@ const currentRole = selectedProject?.role;
 const isManager = currentRole === "MANAGER";
 const isMaker = currentRole === "MAKER";
 
-  // Safe localStorage read
-  // Reactive localStorage read — re-checks whenever storage changes
-  const [sanityPassed, setSanityPassed] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("sanityPassed")) || false;
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    const handleStorageChange = () => {
-      try {
-        setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false);
-      } catch {
-        setSanityPassed(false);
-      }
-    };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
-
   const [cycleStateData, setCycleStateData] = useState(null);
+  const sanityPassed = !!cycleStateData?.analysisUnlocked;
 
   useEffect(() => {
     if (!selectedProject?.projectId || !isMaker) return;
-    getCycleState(selectedProject.projectId).then(state => {
-      setCycleStateData(state);
-      const unlocked = !!(state?.sanityApproved && !state?.misAnalysisLocked);
-      setSanityPassed(unlocked);
-      // Keep localStorage in sync only as a cache for instant reads elsewhere —
-      // cycleStateData/Firestore remains the source of truth.
-      localStorage.setItem("sanityPassed", JSON.stringify(unlocked));
-    });
+    getCycleState(selectedProject.projectId).then(setCycleStateData);
   }, [selectedProject, isMaker]);
 
   const handleLogout = async () => {
-  localStorage.removeItem("sanityPassed");
-  await logout();
-  navigate("/");
-};
+    await logout();
+    navigate("/");
+  };
 
   return (
     <div
@@ -122,8 +93,8 @@ const isMaker = currentRole === "MAKER";
 
         <ul className="space-y-1">
           {!isAdmin && navItems.map((item) => {
-            const isMisAnalysis = item.path === "/mis-analysis";
-            const isLocked = isMisAnalysis && isMaker && !sanityPassed && !isAdmin;
+    
+            const isLocked = false;
 
             return (
               <li key={item.path}>
