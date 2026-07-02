@@ -1080,7 +1080,17 @@ alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis w
               <FileUploadBox
                 label="Upload Current Sheet" subtitle="This month's MIS Excel file"
                 file={files.curr} accent="indigo"
-                onFileSelect={(f) => setFiles(p => ({ ...p, curr: f }))}
+                onFileSelect={(f) => {
+                  // A new current-month file means this is a revision — whatever
+                  // was submitted before (passed-FYI or rejected) is now stale.
+                  // Reset local submission state so the Submit button and status
+                  // badges reflect this as a brand-new, unsubmitted attempt.
+                  setFiles(p => ({ ...p, curr: f }));
+                  setResults(null);
+                  setCurrentSubmissionStatus(null);
+                  setSubmissionSanityPassed(null);
+                  setRejectionInfo(null);
+                }}
                 onClear={() => setFiles(p => ({ ...p, curr: null }))} />
             </div>
           </div>
