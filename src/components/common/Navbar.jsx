@@ -65,6 +65,10 @@ export default function Navbar({ title = "Dashboard" }) {
           const all = [];
           for (const project of projects) {
             const projectId = project.projectId || project.id;
+            if (!projectId) {
+              console.warn("Skipping project with no ID (notifications):", project);
+              continue;
+            }
             const notifs = await getNotificationsForRole(projectId, "ADMIN");
             // Tag each notification with project name
             notifs.forEach(n => {
