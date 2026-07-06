@@ -33,6 +33,7 @@ const fmt = (val) => {
 };
 
 export default function AdminTracker() {
+  console.log("🔥 TRACKER FILE VERSION 2 LOADED 🔥");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterProject, setFilterProject] = useState("ALL");
@@ -47,10 +48,14 @@ export default function AdminTracker() {
       .then(async (data) => {
         setProjects(data || []);
         const allRows = await getAllProjectsWithSubmissions(data || []);
+        console.log("ALLROWS LENGTH:", allRows.length, allRows);
         setRows(allRows);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => {
+        console.error("🚨 TRACKER FETCH ERROR:", err);
+        setLoading(false);
+      });
   }, []);
 
   const filtered = rows.filter(r =>
