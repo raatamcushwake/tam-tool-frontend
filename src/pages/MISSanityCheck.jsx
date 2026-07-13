@@ -200,14 +200,34 @@ const checkApproval = (my) => {
     });
   } else {
     getAllSanitySubmissions(projectId).then(subs => {
-      if (subs.length > 0) {
-        const latest = subs[0];
-        setCurrentSubmissionStatus(latest.status);
-        setMonthYear(latest.monthYear || "");
-        if (latest.status === "APPROVED") {
-          localStorage.setItem("sanityPassed", JSON.stringify(true));
-          window.dispatchEvent(new Event("storage"));
+      if (subs.length === 0) return;
+
+      // Anchor off the latest APPROVED (truly frozen) submission, not just
+      // whatever was submitted most recently — a rejected/deleted draft
+      // shouldn't be mistaken for "the current month".
+      const latestApproved = subs.find(s => s.status === "APPROVED");
+
+      if (latestApproved?.monthYear) {
+        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        const parts = latestApproved.monthYear.split('-');
+        const monIdx = months.indexOf(parts[0]?.toUpperCase()?.substring(0, 3));
+        const year = parseInt(parts[1]);
+        if (monIdx !== -1 && !isNaN(year)) {
+          const nextMonIdx = (monIdx + 1) % 12;
+          const nextYear = monIdx === 11 ? year + 1 : year;
+          setMonthYear(`${months[nextMonIdx]}-${nextYear}`);
+          setCurrentSubmissionStatus(null);   // fresh month, nothing pending
+          return;
         }
+      }
+
+      // No approved submission at all — fall back to whatever's latest
+      const latest = subs[0];
+      setCurrentSubmissionStatus(latest.status);
+      setMonthYear(latest.monthYear || "");
+      if (latest.status === "APPROVED") {
+        localStorage.setItem("sanityPassed", JSON.stringify(true));
+        window.dispatchEvent(new Event("storage"));
       }
     });
   }
