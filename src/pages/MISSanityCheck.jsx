@@ -14,7 +14,7 @@ import {
   submitSanityForReview, getAllSanitySubmissions, getSanitySubmission,
   reviewerApproveSanity, reviewerRejectSanity,
   managerApproveSanity, managerRejectSanity,
-  uploadFrozenSanityFile, getFrozenSanityMetadata, downloadFrozenSanityAsFile,
+  getFrozenSanityMetadata, downloadFrozenSanityAsFile,
   uploadProofDocument, STATUS_CONFIG
 } from "../services/misSanitySubmissionService";
 
@@ -564,31 +564,12 @@ try {
         managerCommentRef.current
       );
 
-      // Upload current month file as frozen sanity file for next month
-      try {
-        const submissionDoc = await getSanitySubmission(
-          selectedProject.projectId,
-          selectedSubmission.monthYear
-        );
-        if (submissionDoc?.currFileURL) {
-          const response = await fetch(submissionDoc.currFileURL);
-          const blob = await response.blob();
-          const file = new File([blob], `${selectedSubmission.monthYear}.xlsx`, {
-            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          });
-          await uploadFrozenSanityFile(
-            selectedProject.projectId,
-            selectedSubmission.monthYear,
-            file
-          );
-        }
-      } catch (storageErr) {
-        console.error("Storage upload error:", storageErr);
-      }
-
-      // ✅ Already handled inside managerApproveSanity service function
-// but also sync localStorage for immediate UI update
-alert('✅ Final Approved! Sanity record is now frozen for audit. MIS Analysis was already unlocked when the check ran.');
+      // NOTE: The MIS file is intentionally NOT frozen here anymore.
+      // Freezing now happens only when MIS Analysis is finally approved
+      // (see MISAnalysis.jsx -> handleManagerAction). Sanity approval is
+      // just a record/audit step; MIS Analysis was already unlocked when
+      // the check ran.
+      alert('✅ Sanity approved for record-keeping. This month\'s MIS will be frozen only after MIS Analysis is approved by the Manager.');
     } else {
       await managerRejectSanity(
         selectedProject.projectId,
