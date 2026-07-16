@@ -29,9 +29,10 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const ActiveRoute = ({ children }) => {
-  const { currentUser, isPending, isAdmin, userProfile } = useAuth();
+  const { currentUser, isPending, isAdmin, userProfile, profileLoading } = useAuth();
   const { selectedProject } = useProject();
   if (!currentUser) return <Navigate to="/login" />;
+  if (profileLoading) return null;
   if (!isAdmin && isPending) return <Navigate to="/pending" />;
   if (!isAdmin && !selectedProject && userProfile?.projectRoles?.length > 0) {
     return <Navigate to="/select-project" />;
@@ -47,7 +48,9 @@ const AdminRoute = ({ children }) => {
 };
 
 const PublicRoute = ({ children }) => {
-  const { currentUser, isPending, isAdmin, userProfile } = useAuth();
+  const { currentUser, isPending, isAdmin, userProfile, profileLoading } = useAuth();
+  console.log("[PublicRoute] render — currentUser:", !!currentUser, "profileLoading:", profileLoading, "isPending:", isPending, "userProfile:", userProfile?.status);
+  if (currentUser && profileLoading) return null;
   if (currentUser) {
     if (!isAdmin && isPending) return <Navigate to="/pending" />;
     if (!isAdmin && userProfile?.projectRoles?.length > 0) return <Navigate to="/select-project" />;
@@ -67,7 +70,7 @@ function AppRoutes() {
   <PublicRoute><Login /></PublicRoute>
 } />
 <Route path="/home" element={
-  <ProtectedRoute><LandingPage /></ProtectedRoute>
+  <ActiveRoute><LandingPage /></ActiveRoute>
 } />
       <Route path="/register" element={
         <PublicRoute><Register /></PublicRoute>
