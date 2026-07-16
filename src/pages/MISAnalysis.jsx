@@ -65,14 +65,14 @@ function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = 
 }
 
 const tabs = [
-  'All', 'New Bookings', 'Transfers', 'Resale / Anomaly', 'Name Corrections', 'Cancellations',
+  'All', 'New Bookings', 'Resale / Anomaly', 'Name Corrections', 'Cancellations',
   'Agreement Value Change', 'Demand Raised Change', 'Amount Received Change',
   'O/S against Demand Value', 'O/S against Sale Value', 'Debtors Aging',
   'MSP Analysis'
 ];
 
 const statusMap = {
-  'New Bookings': 'NEW', 'Transfers': 'TRANSFER', 'Anomaly': 'ANOMALY',
+  'New Bookings': 'NEW', 'Anomaly': 'ANOMALY',
   'Name Corrections': 'NAME_CORRECTION', 'Cancellations': 'CANCELLATION',
   'Agreement Value Change': 'AGREEMENT_VALUE',
   'Demand Raised Change': 'DEMAND_RAISED_CHANGE',
@@ -139,6 +139,9 @@ useEffect(() => {
 const [rowRemarks, setRowRemarks] = useState({});
 const [rowAttachments, setRowAttachments] = useState({});
 const [rowAttachmentURLs, setRowAttachmentURLs] = useState({});
+const [anomalyClassification, setAnomalyClassification] = useState({});
+const [anomalyRemarks, setAnomalyRemarks] = useState({});
+const [anomalyAttachmentURLs, setAnomalyAttachmentURLs] = useState({});
 
   // Submission states
   const [allSubmissions, setAllSubmissions] = useState([]);
@@ -157,6 +160,7 @@ const managerCommentRef = useRef("");
   const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
   const agingColumns = ["Upto 30 days", "30 - 60 days", "60 - 90 days", "90 - 180 days", "180 - 365 days", "Greater than 365 days", "Total aging"];
 const MSP_COLS = ['MSP_Rate', 'MSP_Variance', 'MSP_Flag'];
+const COLUMN_LABELS = { is_resale: "Anomaly" };
 
 const orderedColumns = (() => {
   const keys = Object.keys(visibleColumns).filter(h => h !== "Change Details" && !MSP_COLS.includes(h));
@@ -616,7 +620,7 @@ console.table(businessPlanData?.quarters);
   getNum(r["180 - 365 days"]) > 0 || 
   getNum(r["Greater than 365 days"]) > 0
 );
-    } else if (activeTab === 'Anomaly') {
+    } else if (activeTab === 'Resale / Anomaly') {
       data = data.filter(r => r.is_resale === true);
     } else if (statusMap[activeTab]) {
       data = data.filter(r => r.Status === statusMap[activeTab]);
@@ -643,6 +647,16 @@ console.table(businessPlanData?.quarters);
     await uploadBytes(uploadRef, file);
     const url = await getDownloadURL(uploadRef);
     setRowAttachmentURLs(prev => ({
+      ...prev,
+      [unitNo]: [...(prev[unitNo] || []), { name: file.name, url }]
+    }));
+  };
+
+  const handleAnomalyAttachmentUpload = async (unitNo, file) => {
+    const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/anomalyAttachments/${unitNo}_${file.name}`);
+    await uploadBytes(uploadRef, file);
+    const url = await getDownloadURL(uploadRef);
+    setAnomalyAttachmentURLs(prev => ({
       ...prev,
       [unitNo]: [...(prev[unitNo] || []), { name: file.name, url }]
     }));
@@ -785,6 +799,9 @@ const enrichedWithRemarks = extractedData.map(row => ({
   ...row,
   makerRemark: rowRemarks[row["Unit No."]] || "",
   makerAttachments: rowAttachmentURLs[row["Unit No."]] || [],
+  anomalyType: anomalyClassification[row["Unit No."]] || row.anomalyType || "",
+  anomalyRemark: anomalyRemarks[row["Unit No."]] || row.anomalyRemark || "",
+  anomalyAttachments: anomalyAttachmentURLs[row["Unit No."]] || row.anomalyAttachments || [],
 }));
 
 const result = await submitMISForReview(selectedProject.projectId, monthYear, {
@@ -899,8 +916,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     const groups = [
       { name: "All Data", data: extractedData },
       { name: "New Bookings", data: extractedData.filter(r => r.Status === 'NEW') },
-      { name: "Transfers", data: extractedData.filter(r => r.Status === 'TRANSFER') },
-      { name: "Anomaly", data: extractedData.filter(r => r.Status === 'ANOMALY') },
+      { name: "Resale-Anomaly", data: extractedData.filter(r => r.is_resale === true) },
       { name: "Name Corrections", data: extractedData.filter(r => r.Status === 'NAME_CORRECTION') },
       { name: "Cancelled", data: extractedData.filter(r => r.Status === 'CANCELLATION') },
     ];
@@ -1079,37 +1095,38 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
               <span className="text-emerald-600 text-xs font-bold">{row["Customer Name"]}</span>
             </div>
           );
-          if (label === "TRANSFER") {
-  // Parse directly from the full original val string using regex
-  // because the outer filter already stripped Customer: and PrevOccupant: segments
-  const fromUnit = val.match(/Unit\s+(\S+)\s*→\s*Unit/)?.[1];
-  const toUnit = val.match(/→\s*Unit\s+(\S+)/)?.[1];
-  const prevOccupant = val.match(/PrevOccupant:\s*([^|]+)/)?.[1]?.trim();
-  const currCustomer = String(row["Customer Name"] || '').trim();
-  return (
-    <div key={idx} className="flex flex-col gap-1 border-l-2 border-blue-400 pl-3">
-      <span className="text-[10px] font-black text-blue-600 uppercase">Unit Transfer</span>
-      {fromUnit && toUnit && fromUnit !== toUnit && (
-        <span className="text-gray-400 text-xs font-semibold">{fromUnit} → {toUnit}</span>
-      )}
-      <div className="flex items-center gap-1 text-xs">
-        <span className="line-through text-gray-400">{prevOccupant || 'Unsold'}</span>
-        <ArrowRight size={10} className="text-gray-400" />
-        <span className="text-blue-600 font-bold">{currCustomer}</span>
-      </div>
-    </div>
-  );
-}
-          if (label === "ANOMALY") return (
-            <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
-              <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale</span>
-              <div className="flex items-center gap-1 text-xs">
-                <span className="line-through text-red-400">{cleanPart.split('→')[0]?.trim()}</span>
-                <ArrowRight size={10} className="text-gray-400" />
-                <span className="text-purple-600 font-bold">{cleanPart.split('→')[1]?.trim()}</span>
+          if (label === "ANOMALY") {
+            const isCrossUnit = /Unit\s+\S+\s*→\s*Unit/.test(val);
+            if (isCrossUnit) {
+              const fromUnit = val.match(/Unit\s+(\S+)\s*→\s*Unit/)?.[1];
+              const toUnit = val.match(/→\s*Unit\s+(\S+)/)?.[1];
+              const prevOccupant = val.match(/PrevOccupant:\s*([^|]+)/)?.[1]?.trim();
+              const currCustomer = String(row["Customer Name"] || '').trim();
+              return (
+                <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
+                  <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale (Unit Change)</span>
+                  {fromUnit && toUnit && fromUnit !== toUnit && (
+                    <span className="text-gray-400 text-xs font-semibold">{fromUnit} → {toUnit}</span>
+                  )}
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="line-through text-gray-400">{prevOccupant || 'Unsold'}</span>
+                    <ArrowRight size={10} className="text-gray-400" />
+                    <span className="text-purple-600 font-bold">{currCustomer}</span>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
+                <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale</span>
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="line-through text-red-400">{cleanPart.split('→')[0]?.trim()}</span>
+                  <ArrowRight size={10} className="text-gray-400" />
+                  <span className="text-purple-600 font-bold">{cleanPart.split('→')[1]?.trim()}</span>
+                </div>
               </div>
-            </div>
-          );
+            );
+          }
           if (label === "NAME CORRECTION") return (
             <div key={idx} className="flex flex-col gap-1 border-l-2 border-teal-400 pl-3">
               <span className="text-[10px] font-black text-teal-600 uppercase">Name Correction</span>
@@ -1162,7 +1179,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       if (!allowed.includes(h)) return null;
     }
     return visibleColumns[h] && (
-      <th key={h} className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{h}</th>
+      <th key={h} className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{COLUMN_LABELS[h] || h}</th>
     );
   });
 
@@ -1280,6 +1297,52 @@ return (
                 </label>
               )}
               {(row.reviewerAttachments || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline">{att.name}</a>
+              ))}
+            </div>
+          )}
+        </td>
+      )}
+      {activeTab === 'Resale / Anomaly' && (
+        <td className="p-4 min-w-[280px] align-top">
+          {isMaker && currentSubmissionStatus !== 'PENDING_REVIEW' && currentSubmissionStatus !== 'PENDING_MANAGER' && currentSubmissionStatus !== 'APPROVED' ? (
+            <div className="flex flex-col gap-2">
+              <select
+                value={anomalyClassification[row["Unit No."]] || ""}
+                onChange={e => setAnomalyClassification(prev => ({ ...prev, [row["Unit No."]]: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-400 bg-white">
+                <option value="">Select type...</option>
+                <option value="TRANSFER">Transfer</option>
+                <option value="RESALE">Resale</option>
+                <option value="OTHER">Other</option>
+              </select>
+              <textarea
+                placeholder="Add remark..."
+                value={anomalyRemarks[row["Unit No."]] || ""}
+                onChange={e => setAnomalyRemarks(prev => ({ ...prev, [row["Unit No."]]: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs resize-none focus:outline-none focus:border-purple-400"
+                rows={2}
+              />
+              <label className="flex items-center gap-1 cursor-pointer text-xs text-purple-600 font-bold">
+                <Upload size={12} />
+                Attach Doc
+                <input type="file" className="hidden" onChange={e => { if (e.target.files[0]) handleAnomalyAttachmentUpload(row["Unit No."], e.target.files[0]); }} />
+              </label>
+              {(anomalyAttachmentURLs[row["Unit No."]] || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline truncate max-w-[200px]">{att.name}</a>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {(row.anomalyType || anomalyClassification[row["Unit No."]]) && (
+                <span className="text-[9px] font-black px-2 py-1 rounded border bg-purple-50 text-purple-600 border-purple-300 uppercase w-fit">
+                  {row.anomalyType || anomalyClassification[row["Unit No."]]}
+                </span>
+              )}
+              {(row.anomalyRemark || anomalyRemarks[row["Unit No."]]) && (
+                <p className="text-xs text-gray-700 italic">"{row.anomalyRemark || anomalyRemarks[row["Unit No."]]}"</p>
+              )}
+              {(row.anomalyAttachments || anomalyAttachmentURLs[row["Unit No."]] || []).map((att, i) => (
                 <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline">{att.name}</a>
               ))}
             </div>
@@ -1836,8 +1899,7 @@ const planned = bpTargets.planned_collection;
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
         {[
           { label: 'New Bookings', value: extractedData.filter(r => r.Status === 'NEW').length, color: 'text-emerald-600', tab: 'New Bookings' },
-          { label: 'Transfers', value: extractedData.filter(r => r.Status === 'TRANSFER').length, color: 'text-blue-500', tab: 'Transfers' },
-          { label: 'Resale / Anomaly', value: extractedData.filter(r => r.is_resale === true).length, color: 'text-purple-600', tab: 'Anomaly' },
+          { label: 'Resale / Anomaly', value: extractedData.filter(r => r.is_resale === true).length, color: 'text-purple-600', tab: 'Resale / Anomaly' },
           { label: 'Name Corrections', value: extractedData.filter(r => r.Status === 'NAME_CORRECTION').length, color: 'text-pink-500', tab: 'Name Corrections' },
           { label: 'Cancellations', value: auditTotals.cancellations, color: 'text-red-500', tab: 'Cancellations' },
           { label: 'Demand ↑', value: '₹' + formatValue(auditTotals.demandIncrement), color: 'text-orange-500', tab: 'Demand Raised Change' },
@@ -2210,6 +2272,9 @@ const planned = bpTargets.planned_collection;
                   {activeTab === 'New Bookings' && (
                     <th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>
                   )}
+                  {activeTab === 'Resale / Anomaly' && (
+                    <th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Classification & Remarks</th>
+                  )}
                 </tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
@@ -2221,7 +2286,7 @@ const planned = bpTargets.planned_collection;
           <div className="mt-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: '500px' }}>
             <table className="w-full text-left border-collapse min-w-max">
               <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}</tr>
+                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}{activeTab === 'Resale / Anomaly' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Classification & Remarks</th>)}</tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
             </table>
@@ -2231,7 +2296,7 @@ const planned = bpTargets.planned_collection;
           <div className="mt-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: '500px' }}>
             <table className="w-full text-left border-collapse min-w-max">
               <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}</tr>
+                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}{activeTab === 'Resale / Anomaly' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Classification & Remarks</th>)}</tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
             </table>
