@@ -7,7 +7,7 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import PendingApproval from "./pages/PendingApproval";
 import RejectedAccess from "./pages/RejectedAccess";
-import ProjectSelector from "./pages/ProjectSelector";
+
 import Dashboard from "./pages/Dashboard";
 import MISSanityCheck from "./pages/MISSanityCheck";
 import MISAnalysis from "./pages/MISAnalysis";
@@ -30,15 +30,11 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const ActiveRoute = ({ children }) => {
-  const { currentUser, isPending, isRejected, isAdmin, userProfile, profileLoading } = useAuth();
-  const { selectedProject } = useProject();
+  const { currentUser, isPending, isRejected, isAdmin, profileLoading } = useAuth();
   if (!currentUser) return <Navigate to="/login" />;
   if (profileLoading) return null;
   if (!isAdmin && isRejected) return <Navigate to="/rejected" />;
   if (!isAdmin && isPending) return <Navigate to="/pending" />;
-  if (!isAdmin && !selectedProject && userProfile?.projectRoles?.length > 0) {
-    return <Navigate to="/select-project" />;
-  }
   return children;
 };
 
@@ -50,12 +46,12 @@ const AdminRoute = ({ children }) => {
 };
 
 const PublicRoute = ({ children }) => {
-  const { currentUser, isPending, isRejected, isAdmin, userProfile, profileLoading } = useAuth();
+  const { currentUser, isPending, isRejected, isAdmin, profileLoading } = useAuth();
   if (currentUser && profileLoading) return null;
   if (currentUser) {
-    if (!isAdmin && isRejected) return <Navigate to="/rejected" />;
-    if (!isAdmin && isPending) return <Navigate to="/pending" />;
-    if (!isAdmin && userProfile?.projectRoles?.length > 0) return <Navigate to="/select-project" />;
+    if (isAdmin) return <Navigate to="/admin" />;
+    if (isRejected) return <Navigate to="/rejected" />;
+    if (isPending) return <Navigate to="/pending" />;
     return <Navigate to="/home" />;
   }
   return children;
@@ -93,10 +89,7 @@ function AppRoutes() {
         <ProtectedRoute><RejectedAccess /></ProtectedRoute>
       } />
 
-      {/* Project Selector */}
-      <Route path="/select-project" element={
-        <ProtectedRoute><ProjectSelector /></ProtectedRoute>
-      } />
+      
 
       {/* Active users only */}
       <Route path="/dashboard" element={
