@@ -81,9 +81,12 @@ const [profileLoading, setProfileLoading] = useState(true);
                    userProfile?.status === "ACTIVE";
 
   const isPending = userProfile?.status === "PENDING" || 
-                    userProfile?.status === "pending";
+                  userProfile?.status === "pending";
 
-  const value = {
+const isRejected = userProfile?.status === "REJECTED" || 
+                   userProfile?.status === "rejected";
+
+const value = {
   currentUser,
   userProfile,
   login,
@@ -92,6 +95,7 @@ const [profileLoading, setProfileLoading] = useState(true);
   isAdmin,
   isActive,
   isPending,
+  isRejected,
   profileLoading,
 };
 
