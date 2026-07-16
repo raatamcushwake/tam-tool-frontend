@@ -6,6 +6,7 @@ import LandingPage from "./pages/LandingPage";
 import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import PendingApproval from "./pages/PendingApproval";
+import RejectedAccess from "./pages/RejectedAccess";
 import ProjectSelector from "./pages/ProjectSelector";
 import Dashboard from "./pages/Dashboard";
 import MISSanityCheck from "./pages/MISSanityCheck";
@@ -29,10 +30,11 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const ActiveRoute = ({ children }) => {
-  const { currentUser, isPending, isAdmin, userProfile, profileLoading } = useAuth();
+  const { currentUser, isPending, isRejected, isAdmin, userProfile, profileLoading } = useAuth();
   const { selectedProject } = useProject();
   if (!currentUser) return <Navigate to="/login" />;
   if (profileLoading) return null;
+  if (!isAdmin && isRejected) return <Navigate to="/rejected" />;
   if (!isAdmin && isPending) return <Navigate to="/pending" />;
   if (!isAdmin && !selectedProject && userProfile?.projectRoles?.length > 0) {
     return <Navigate to="/select-project" />;
@@ -48,10 +50,10 @@ const AdminRoute = ({ children }) => {
 };
 
 const PublicRoute = ({ children }) => {
-  const { currentUser, isPending, isAdmin, userProfile, profileLoading } = useAuth();
-  console.log("[PublicRoute] render — currentUser:", !!currentUser, "profileLoading:", profileLoading, "isPending:", isPending, "userProfile:", userProfile?.status);
+  const { currentUser, isPending, isRejected, isAdmin, userProfile, profileLoading } = useAuth();
   if (currentUser && profileLoading) return null;
   if (currentUser) {
+    if (!isAdmin && isRejected) return <Navigate to="/rejected" />;
     if (!isAdmin && isPending) return <Navigate to="/pending" />;
     if (!isAdmin && userProfile?.projectRoles?.length > 0) return <Navigate to="/select-project" />;
     return <Navigate to="/home" />;
@@ -84,6 +86,11 @@ function AppRoutes() {
       {/* Pending */}
       <Route path="/pending" element={
         <ProtectedRoute><PendingApproval /></ProtectedRoute>
+      } />
+
+      {/* Rejected */}
+      <Route path="/rejected" element={
+        <ProtectedRoute><RejectedAccess /></ProtectedRoute>
       } />
 
       {/* Project Selector */}
