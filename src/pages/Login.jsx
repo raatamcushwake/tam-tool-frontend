@@ -8,7 +8,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, fetchUserProfile } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
 
 
@@ -17,10 +17,11 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const result = await login(email, password);
-      await fetchUserProfile(result.user.uid);
-      localStorage.removeItem("sanityPassed");
-      navigate("/home");
+      await login(email, password);
+      // Don't fetch profile or navigate here — the AuthContext listener
+      // fetches the profile automatically, and PublicRoute/ActiveRoute
+      // handle redirecting to /home, /pending, or /select-project based
+      // on the result. Doing it here too caused a race condition.
     } catch (_err) {
       setError("Invalid email or password. Please try again.");
     }
