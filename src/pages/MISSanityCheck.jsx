@@ -143,6 +143,7 @@ export default function MISSanityCheck() {
   const [unitRemarks, setUnitRemarks] = useState({});       // { "A-101": "some remark" }
   const [unitDocs, setUnitDocs] = useState({});             // { "A-101": [File, File] }
   const [unitDocsUploading, setUnitDocsUploading] = useState({});
+  const [unitAnomalyType, setUnitAnomalyType] = useState({});   // { "A-101": "TRANSFER" }
   const unitDocInputRefs = useRef({});
   const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
@@ -451,10 +452,14 @@ try {
     // Upload per-unit docs and build unitAnnotations
     const unitAnnotations = {};
     for (const unitNo of Object.keys(unitRemarks)) {
-      unitAnnotations[unitNo] = { makerRemark: unitRemarks[unitNo] || "", makerDocs: [] };
+      unitAnnotations[unitNo] = { makerRemark: unitRemarks[unitNo] || "", makerDocs: [], makerAnomalyType: unitAnomalyType[unitNo] || "" };
+    }
+    for (const unitNo of Object.keys(unitAnomalyType)) {
+      if (!unitAnnotations[unitNo]) unitAnnotations[unitNo] = { makerRemark: "", makerDocs: [], makerAnomalyType: "" };
+      unitAnnotations[unitNo].makerAnomalyType = unitAnomalyType[unitNo] || "";
     }
     for (const unitNo of Object.keys(unitDocs)) {
-      if (!unitAnnotations[unitNo]) unitAnnotations[unitNo] = { makerRemark: "", makerDocs: [] };
+      if (!unitAnnotations[unitNo]) unitAnnotations[unitNo] = { makerRemark: "", makerDocs: [], makerAnomalyType: unitAnomalyType[unitNo] || "" };
       for (const file of (unitDocs[unitNo] || [])) {
         const uploadResult = await uploadProofDocument(
           selectedProject.projectId, monthYear, file, `unit_${unitNo}_maker`
@@ -498,6 +503,7 @@ try {
       makerCommentRef.current = '';
       setUnitRemarks({});
       setUnitDocs({});
+      setUnitAnomalyType({});
       alert('✅ Submitted for Review successfully!');
     } else {
       alert('Error submitting: ' + result.error);
@@ -717,8 +723,11 @@ try {
     if (activeTab === "anomaly" && unit.anomaly_detected) return (
       <div className="flex flex-col gap-1 py-1 border-l-2 border-purple-400 pl-4">
         <span className="text-[10px] font-black uppercase text-purple-600">Anomaly / Resale</span>
+        {unit.from_unit && unit.to_unit && unit.from_unit !== unit.to_unit && (
+          <span className="text-gray-400 text-xs font-semibold">{unit.from_unit} → {unit.to_unit}</span>
+        )}
         <div className="flex items-center gap-2 text-xs">
-          <span className="line-through text-red-400">{unit.prev_customer}</span>
+          <span className="line-through text-red-400">{unit.prev_customer || 'Unsold'}</span>
           <MoveRight size={12} className="text-gray-400" />
           <span className="text-purple-600 font-bold">{unit.curr_customer}</span>
         </div>
@@ -775,10 +784,19 @@ try {
     return allFailedUnitNos.has(unit?.['Unit No.']);
   };
 
+  const isAnomalyUnit = (unit) => {
+    if (!activeResults) return false;
+    const r = activeResults;
+    const anomalySet = new Set([
+      ...(r.anomaly_units || []),
+      ...(r.transferred_units || []).filter(u => u.anomaly_detected)
+    ].map(u => u?.['Unit No.']));
+    return anomalySet.has(unit?.['Unit No.']);
+  };
+
   const tabs = [
     { id: "all", label: "All Errors", color: "bg-blue-600" },
     { id: "new", label: "New Bookings", color: "bg-purple-600" },
-    { id: "transfer", label: "Transfers", color: "bg-blue-500" },
     { id: "anomaly", label: "Anomaly", color: "bg-purple-600" },
     { id: "name_correction", label: "Name Correction", color: "bg-teal-600" },
     { id: "cancelled", label: "Cancelled", color: "bg-orange-500" },
@@ -834,7 +852,6 @@ try {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           { label: 'New Bookings', value: r.summary?.new_bookings_count ?? 0, sub: 'New Inventory', accent: 'border-l-purple-500' },
-          { label: 'Transfers', value: r.summary?.transferred_count ?? 0, sub: 'Ownership Change', accent: 'border-l-blue-500' },
           { label: 'Name Corr.', value: r.summary?.name_correction_count ?? 0, sub: 'Spelling Fixes', accent: 'border-l-teal-500' },
           { label: 'Cancelled', value: r.summary?.cancelled_count ?? 0, sub: 'Unsold/Missing', accent: 'border-l-orange-500' },
           { label: 'Duplicates', value: r.summary?.duplicate_count ?? 0, sub: 'Duplicate Entries', accent: 'border-l-red-500' },
@@ -919,11 +936,19 @@ try {
                     {(() => {
                       const unitNo = unit?.['Unit No.'];
                       const failed = isFailedUnit(unit);
+                      const isAnomaly = isAnomalyUnit(unit);
                       const annotation = (selectedSubmission?.unitAnnotations || {})[unitNo] || (activeResults?.unitAnnotations || {})[unitNo] || {};
                       const canEdit = (isMaker && !selectedSubmission) || isReviewer;
 
                       return (
                         <div className="flex flex-col gap-2 min-w-[240px]">
+
+                          {/* Anomaly classification — show if saved */}
+                          {annotation.makerAnomalyType && (
+                            <span className="text-[9px] font-black px-2 py-1 rounded border bg-purple-50 text-purple-600 border-purple-300 uppercase w-fit">
+                              {annotation.makerAnomalyType}
+                            </span>
+                          )}
 
                           {/* Maker remark — always show if exists */}
                           {annotation.makerRemark && (
@@ -961,9 +986,20 @@ try {
                             </div>
                           )}
 
-                          {/* Editable remark input — only for failed units + correct role */}
-                          {failed && canEdit && (
+                          {/* Editable remark input — for failed OR anomaly units + correct role */}
+                          {(failed || isAnomaly) && canEdit && (
                             <>
+                              {isAnomaly && (
+                                <select
+                                  value={unitAnomalyType[unitNo] || ""}
+                                  onChange={e => setUnitAnomalyType(prev => ({ ...prev, [unitNo]: e.target.value }))}
+                                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-400 bg-white">
+                                  <option value="">Select type...</option>
+                                  <option value="TRANSFER">Transfer</option>
+                                  <option value="RESALE">Resale</option>
+                                  <option value="OTHER">Other</option>
+                                </select>
+                              )}
                               <textarea
                                 rows={2}
                                 placeholder={isReviewer ? "Reviewer remark..." : "Add remark for this unit..."}
@@ -1003,8 +1039,8 @@ try {
                             </>
                           )}
 
-                          {/* Non-failed units — no input needed */}
-                          {!failed && !annotation.makerRemark && !annotation.reviewerRemark && (
+                          {/* Neither failed nor anomaly — no input needed */}
+                          {!failed && !isAnomaly && !annotation.makerRemark && !annotation.reviewerRemark && (
                             <span className="text-gray-300 text-xs">—</span>
                           )}
                         </div>
