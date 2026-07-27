@@ -162,8 +162,40 @@ const managerCommentRef = useRef("");
 const MSP_COLS = ['MSP_Rate', 'MSP_Variance', 'MSP_Flag'];
 const COLUMN_LABELS = { is_resale: "Anomaly" };
 
+const COLUMN_ORDER = [
+  "Unit No.",
+  "Tower",
+  "Unit Type",
+  "Disbursement",
+  "Customer Name",
+  "Booking Date",
+  "Registration Date",
+  "Saleable area in sft",
+  "Carpet area in sft",
+  "Rate per sft",
+  "Agreement value",
+  "Amount Received excl. Tax Current Month",
+  "Demand Raised as on Current Month excl. tax",
+  "Outstanding against sale value",
+  "O/S against Sale Value",
+  "Outstanding against demand",
+  "O/S % Demand",
+  "makerRemark",
+  "makerAttachments",
+];
+
 const orderedColumns = (() => {
   const keys = Object.keys(visibleColumns).filter(h => h !== "Change Details" && !MSP_COLS.includes(h));
+
+  keys.sort((a, b) => {
+    const ia = COLUMN_ORDER.indexOf(a);
+    const ib = COLUMN_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return 0;
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
   const agreementIdx = keys.indexOf("Agreement value");
   if (agreementIdx !== -1) {
     keys.splice(agreementIdx + 1, 0, ...MSP_COLS.filter(c => visibleColumns[c] !== undefined));
@@ -223,7 +255,8 @@ useEffect(() => {
           const cols = {};
           const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
             'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+            'Amount Received excl. Tax'];
           const allKeys = new Set();
           data.extractedData.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
           allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
@@ -758,7 +791,8 @@ const currFile = new File([currBlob], `${cycleMonth}.xlsx`, {
           const cols = {};
           const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
             'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+            'Amount Received excl. Tax'];
           const allKeys = new Set();
           enriched.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
           allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
@@ -2622,7 +2656,8 @@ const planned = bpTargets.planned_collection;
                         const cols = {};
                         const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
                           'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-                          'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+                          'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+                          'Amount Received excl. Tax'];
                         const allSubKeys = new Set();
                         sub.extractedData.forEach(row => Object.keys(row).forEach(k => allSubKeys.add(k)));
                         allSubKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
