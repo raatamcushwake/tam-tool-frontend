@@ -1171,6 +1171,11 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
               </div>
             </div>
           );
+          if (label === "TRANSFER") return (
+            <div key={idx} className="flex flex-col gap-1 border-l-2 border-blue-400 pl-3">
+              <span className="text-[10px] font-black text-blue-600 uppercase">Transfer</span>
+            </div>
+          );
           const arrowParts = cleanPart.split('→');
           if (arrowParts.length >= 2) {
             const v1 = parseFloat(arrowParts[0].replace(/[^0-9.-]/g, '')) || 0;
