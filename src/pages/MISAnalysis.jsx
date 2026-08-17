@@ -3,8 +3,7 @@ import { getInventoryData, getBusinessPlanData, getMSPData } from "../services/r
 import {
   submitMISForReview, getAllMISSubmissions, getLastApprovedMIS,
   reviewerApproveMIS, reviewerRejectMIS, managerApproveMIS, managerRejectMIS,
-  STATUS_CONFIG, uploadFrozenMISFile, getFrozenMISMetadata, downloadFrozenMISAsFile,
-  getMISSubmission
+  STATUS_CONFIG, getMISSubmission
 } from "../services/misSubmissionService";
 import Layout from "../components/common/Layout";
 import { useProject } from "../context/ProjectContext";
@@ -22,6 +21,8 @@ import * as XLSX from "xlsx-js-style";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage, db } from "../services/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { getCycleState } from "../services/cycleStateService";
+import { getSanityForAnalysis, downloadFrozenSanityAsFile, uploadFrozenSanityFile, markSanityAnalysisApproved } from "../services/misSanitySubmissionService";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
   const inputRef = useRef(null);
@@ -64,14 +65,14 @@ function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = 
 }
 
 const tabs = [
-  'All', 'New Bookings', 'Transfers', 'Anomaly', 'Name Corrections', 'Cancellations',
+  'All', 'New Bookings', 'Resale / Anomaly', 'Name Corrections', 'Cancellations',
   'Agreement Value Change', 'Demand Raised Change', 'Amount Received Change',
   'O/S against Demand Value', 'O/S against Sale Value', 'Debtors Aging',
   'MSP Analysis'
 ];
 
 const statusMap = {
-  'New Bookings': 'NEW', 'Transfers': 'TRANSFER', 'Anomaly': 'ANOMALY',
+  'New Bookings': 'NEW', 'Anomaly': 'ANOMALY',
   'Name Corrections': 'NAME_CORRECTION', 'Cancellations': 'CANCELLATION',
   'Agreement Value Change': 'AGREEMENT_VALUE',
   'Demand Raised Change': 'DEMAND_RAISED_CHANGE',
@@ -86,18 +87,38 @@ export default function MISAnalysis() {
   const isReviewer = selectedProject?.role === "REVIEWER";
   const isManager = selectedProject?.role === "MANAGER";
   const [sanityPassed, setSanityPassed] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("sanityPassed")) || false; }
-    catch { return false; }
-  });
+  try { return JSON.parse(localStorage.getItem("sanityPassed")) || false; }
+  catch { return false; }
+});
+const [cycleStateData, setCycleStateData] = useState(null);
+const [misRejectionInfo, setMisRejectionInfo] = useState(null);
+const [cycleLoading, setCycleLoading] = useState(true);
 
   useEffect(() => {
-    const handleStorageChange = () => {
-      try { setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false); }
-      catch { setSanityPassed(false); }
-    };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
+  const handleStorageChange = () => {
+    try { setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false); }
+    catch { setSanityPassed(false); }
+  };
+  window.addEventListener("storage", handleStorageChange);
+  return () => window.removeEventListener("storage", handleStorageChange);
+}, []);
+
+useEffect(() => {
+  if (!selectedProject?.projectId || !isMaker) {
+    setCycleLoading(false);
+    return;
+  }
+  getCycleState(selectedProject.projectId).then(state => {
+    setCycleStateData(state);
+    setCycleLoading(false);
+    if (state?.sanityApproved && !state?.misAnalysisLocked) {
+      localStorage.setItem("sanityPassed", JSON.stringify(true));
+    } else {
+      localStorage.setItem("sanityPassed", JSON.stringify(false));
+    }
+    window.dispatchEvent(new Event("storage"));
+  });
+}, [selectedProject, isMaker]);
 
   const [files, setFiles] = useState({ prev: null, curr: null });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -115,12 +136,12 @@ export default function MISAnalysis() {
   const [monthYear, setMonthYear] = useState('');
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [mspData, setMspData] = useState(null);
-const [frozenMISMetadata, setFrozenMISMetadata] = useState(null);
-const [frozenFileLoading, setFrozenFileLoading] = useState(false);
-const [frozenFileLoaded, setFrozenFileLoaded] = useState(false);
 const [rowRemarks, setRowRemarks] = useState({});
 const [rowAttachments, setRowAttachments] = useState({});
 const [rowAttachmentURLs, setRowAttachmentURLs] = useState({});
+const [anomalyClassification, setAnomalyClassification] = useState({});
+const [anomalyRemarks, setAnomalyRemarks] = useState({});
+const [anomalyAttachmentURLs, setAnomalyAttachmentURLs] = useState({});
 
   // Submission states
   const [allSubmissions, setAllSubmissions] = useState([]);
@@ -131,15 +152,50 @@ const managerCommentRef = useRef("");
   const [actionLoading, setActionLoading] = useState(false);
   const [currentSubmissionStatus, setCurrentSubmissionStatus] = useState(null);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [showMakerDetails, setShowMakerDetails] = useState(false);
+  const [makerSubmissionDoc, setMakerSubmissionDoc] = useState(null);
 
   const columnFilterRef = useRef(null);
   const analysisTablesRef = useRef(null);
   const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
   const agingColumns = ["Upto 30 days", "30 - 60 days", "60 - 90 days", "90 - 180 days", "180 - 365 days", "Greater than 365 days", "Total aging"];
 const MSP_COLS = ['MSP_Rate', 'MSP_Variance', 'MSP_Flag'];
+const COLUMN_LABELS = { is_resale: "Anomaly" };
+
+const COLUMN_ORDER = [
+  "Unit No.",
+  "Tower",
+  "Unit Type",
+  "Disbursement",
+  "Customer Name",
+  "Booking Date",
+  "Registration Date",
+  "Saleable area in sft",
+  "Carpet area in sft",
+  "Rate per sft",
+  "Agreement value",
+  "Amount Received excl. Tax Current Month",
+  "Demand Raised as on Current Month excl. tax",
+  "Outstanding against sale value",
+  "O/S against Sale Value",
+  "Outstanding against demand",
+  "O/S % Demand",
+  "makerRemark",
+  "makerAttachments",
+];
 
 const orderedColumns = (() => {
   const keys = Object.keys(visibleColumns).filter(h => h !== "Change Details" && !MSP_COLS.includes(h));
+
+  keys.sort((a, b) => {
+    const ia = COLUMN_ORDER.indexOf(a);
+    const ib = COLUMN_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return 0;
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
   const agreementIdx = keys.indexOf("Agreement value");
   if (agreementIdx !== -1) {
     keys.splice(agreementIdx + 1, 0, ...MSP_COLS.filter(c => visibleColumns[c] !== undefined));
@@ -161,45 +217,59 @@ useEffect(() => {
 useEffect(() => {
   const projectId = selectedProject?.projectId;
   if (!projectId || !isMaker) return;
-  getFrozenMISMetadata(projectId).then(meta => {
-    setFrozenMISMetadata(meta);
-    if (meta?.monthYear) {
-      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-      const parts = meta.monthYear.split('-');
-      const monIdx = months.indexOf(parts[0]?.toUpperCase()?.substring(0,3));
-      const year = parseInt(parts[1]);
-      if (monIdx !== -1 && !isNaN(year)) {
-        const nextMonIdx = (monIdx + 1) % 12;
-        const nextYear = monIdx === 11 ? year + 1 : year;
-        const nextMonth = `${months[nextMonIdx]}-${nextYear}`;
-        setMonthYear(nextMonth);
-      }
-    }
-  });
-}, [selectedProject, isMaker]);
+  // monthYear now derives from cycleStateData.cycleMonth (set inside autoRunAnalysis),
+  // not from a separately-uploaded frozenMIS metadata doc.
+  if (cycleStateData?.cycleMonth) {
+    setMonthYear(cycleStateData.cycleMonth);
+  }
+}, [selectedProject, isMaker, cycleStateData]);
 
-  // Load all submissions for Reviewer/Manager
+  // Load all submissions for Maker/Reviewer/Manager
   useEffect(() => {
     const projectId = selectedProject?.projectId;
-    if (!projectId || isMaker) return;
+    if (!projectId) return;
     setSubmissionsLoading(true);
     getAllMISSubmissions(projectId).then(data => {
       setAllSubmissions(data);
       setSubmissionsLoading(false);
     });
-  }, [selectedProject, isMaker]);
+  }, [selectedProject]);
 
   // Check current month submission status for Maker
   useEffect(() => {
-    const projectId = selectedProject?.projectId;
-    if (!projectId || !monthYear || !isMaker) return;
-    import("../services/misSubmissionService").then(({ getMISSubmission }) => {
-      getMISSubmission(projectId, monthYear).then(data => {
-        if (data) setCurrentSubmissionStatus(data.status);
-        else setCurrentSubmissionStatus(null);
-      });
+  const projectId = selectedProject?.projectId;
+  if (!projectId || !monthYear || !isMaker) return;
+  import("../services/misSubmissionService").then(({ getMISSubmission }) => {
+    getMISSubmission(projectId, monthYear).then(data => {
+      if (data) {
+        setCurrentSubmissionStatus(data.status);
+        setMakerSubmissionDoc(data);
+        setMisRejectionInfo({
+          rejectionComment: data.rejectionComment || "",
+          reviewerComment: data.reviewerComment || "",
+        });
+        // Load submitted data so Maker can see their analysis while pending
+        if (data.extractedData?.length > 0) {
+          setExtractedData(data.extractedData);
+          setUnitStats(data.unitStats || { total: 0, sold: 0, unsold: 0 });
+          const cols = {};
+          const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
+            'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
+            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+            'Amount Received excl. Tax'];
+          const allKeys = new Set();
+          data.extractedData.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+          allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+          setVisibleColumns(cols);
+        }
+      } else {
+        setCurrentSubmissionStatus(null);
+        setMakerSubmissionDoc(null);
+        setMisRejectionInfo(null);
+      }
     });
-  }, [selectedProject, monthYear, isMaker]);
+  });
+}, [selectedProject, monthYear, isMaker]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -320,6 +390,31 @@ useEffect(() => {
     t.netAreaSold = t.actualAreaSold - t.cancelledAreaSold;
     return t;
   }, [extractedData]);
+
+  useEffect(() => {
+  if (!extractedData.length || !inventoryData?.rows) return;
+
+  const soldRows = extractedData.filter(r => r.Status !== 'CANCELLATION' && isUnitSold(r["Customer Name"]));
+
+  const inventoryTowerTypes = inventoryData.rows.map(row => ({
+    tower: String(row.tower || '').trim().toLowerCase(),
+    type: String(row.unitType || '').trim().toLowerCase(),
+  }));
+
+  const unmatched = soldRows.filter(r => {
+    const rTower = String(r["Tower"] || '').trim().toLowerCase();
+    const rType = String(r["Unit Type"] || '').trim().toLowerCase();
+    return !inventoryTowerTypes.some(inv => {
+      const typeMatches = inv.type === rType ||
+        (rType === 'shop' && inv.type === 'commercial') ||
+        (rType === 'commercial' && inv.type === 'shop');
+      return inv.tower === rTower && typeMatches;
+    });
+  });
+
+  console.log("=== INVENTORY MATCH DEBUG ===");
+  console.log("Sold rows not matched to any Inventory Sheet Tower/Type:", unmatched.length, unmatched);
+}, [extractedData, inventoryData]);
 
   const mspAnalysis = useMemo(() => {
     if (!mspData?.rates) return { belowMSP: [], atMSP: [], noMSP: [] };
@@ -545,6 +640,9 @@ else atMSP.push(entry);
   };
 }, [businessPlanData, monthYear]);
 
+  console.log("DEBUG monthYear:", monthYear);
+console.table(businessPlanData?.quarters);
+
   const processedData = useMemo(() => {
     let data = [...extractedData];
     if (activeTab === 'Debtors Aging') {
@@ -555,6 +653,8 @@ else atMSP.push(entry);
   getNum(r["180 - 365 days"]) > 0 || 
   getNum(r["Greater than 365 days"]) > 0
 );
+    } else if (activeTab === 'Resale / Anomaly') {
+      data = data.filter(r => r.is_resale === true);
     } else if (statusMap[activeTab]) {
       data = data.filter(r => r.Status === statusMap[activeTab]);
     } else if (activeTab === 'O/S against Demand Value' && selectedAgingFilter) {
@@ -576,7 +676,7 @@ else atMSP.push(entry);
   }, [extractedData, activeTab, searchTerm, selectedAgingFilter, selectedSaleFilter]);
 
   const handleAttachmentUpload = async (unitNo, file) => {
-    const uploadRef = ref(storage, `projects/${selectedProject.projectId}/bookingAttachments/${unitNo}_${file.name}`);
+    const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/bookingAttachments/${unitNo}_${file.name}`);
     await uploadBytes(uploadRef, file);
     const url = await getDownloadURL(uploadRef);
     setRowAttachmentURLs(prev => ({
@@ -585,112 +685,157 @@ else atMSP.push(entry);
     }));
   };
 
-  const runComparison = async () => {
-  setIsProcessing(true);
-  setExtractedData([]);
-  try {
-    let prevFile = files.prev;
+  const handleAnomalyAttachmentUpload = async (unitNo, file) => {
+    const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/anomalyAttachments/${unitNo}_${file.name}`);
+    await uploadBytes(uploadRef, file);
+    const url = await getDownloadURL(uploadRef);
+    setAnomalyAttachmentURLs(prev => ({
+      ...prev,
+      [unitNo]: [...(prev[unitNo] || []), { name: file.name, url }]
+    }));
+  };
 
-    if (!prevFile && frozenMISMetadata) {
-      setFrozenFileLoading(true);
-      const result = await downloadFrozenMISAsFile(selectedProject.projectId);
-      setFrozenFileLoading(false);
-      if (!result.success) {
-        alert("Failed to load frozen previous month file from Firebase. Please upload manually.");
+  const autoRunAnalysis = async () => {
+    setIsProcessing(true);
+    setExtractedData([]);
+    try {
+      const cycleMonth = cycleStateData?.cycleMonth;
+      if (!cycleMonth) {
+        alert("No approved Sanity Check month found. Please contact Manager.");
         setIsProcessing(false);
         return;
       }
-      prevFile = result.file;
-      setFrozenFileLoaded(true);
-    }
+      setMonthYear(cycleMonth);
 
-    if (!prevFile || !files.curr) {
-      alert("Please upload both Previous and Current Month MIS");
+      let currURL = cycleStateData?.stagedCurrURL;
+      let prevURL = cycleStateData?.stagedPrevURL;
+      if (!currURL || !prevURL) {
+        const sanityForMonth = await getSanityForAnalysis(selectedProject.projectId, cycleMonth);
+        currURL = currURL || sanityForMonth?.currFileURL;
+        prevURL = prevURL || sanityForMonth?.prevFileURL;
+      }
+      if (!currURL) {
+        alert("Could not find this month's current MIS file. Please re-run Sanity Check.");
+        setIsProcessing(false);
+        return;
+      }
+      if (!prevURL) {
+        alert("Could not find the previous month's MIS file. Please re-run Sanity Check.");
+        setIsProcessing(false);
+        return;
+      }
+
+const prevRes = await fetch(prevURL);
+const prevBlob = await prevRes.blob();
+const prevFile = new File([prevBlob], `prev_${cycleMonth}.xlsx`, {
+  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+});
+
+const currRes = await fetch(currURL);
+const currBlob = await currRes.blob();
+const currFile = new File([currBlob], `${cycleMonth}.xlsx`, {
+  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+});
+      console.log("PREV FILE:", prevFile.name, prevFile.size);
+      console.log("CURR FILE:", currFile.name, currFile.size);
+      console.log("Same file size?", prevFile.size === currFile.size);
+
+      const formData = new FormData();
+      formData.append("prev_month", prevFile);
+      formData.append("curr_month", currFile);
+
+      const res = await fetch(`${apiUrl}/api/mis-analysis/compare`, { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (data.status === "success") {
+        const mspRates = mspData?.rates || [];
+        const enriched = (data.extracted_data || []).map(row => {
+          if (row.Status !== 'NEW' || !isUnitSold(row["Customer Name"])) return row;
+          const tower = String(row["Tower"] || '').trim().toLowerCase();
+          const unitType = String(row["Unit Type"] || '').trim().toLowerCase();
+          const ratePerSft = getNum(row["Rate per sft"]);
+          const unitNo = String(row["Unit No."] || '').trim().toLowerCase();
+          const unitLevelMatch = mspRates.find(m => String(m.unitNo || '').trim().toLowerCase() === unitNo);
+          let msp = 0;
+          if (unitLevelMatch) {
+            msp = unitLevelMatch.mspRate;
+          } else {
+            const matchingRates = mspRates.filter(m => {
+              const mTower = String(m.tower || '').trim().toLowerCase();
+              const mType = String(m.unitType || '').trim().toLowerCase();
+              const typeMatches = mType === unitType ||
+                (unitType === 'shop' && mType === 'commercial') ||
+                (unitType === 'commercial' && mType === 'shop');
+              const towerMatches = mTower === tower || mTower.startsWith(tower);
+              return towerMatches && typeMatches;
+            });
+            if (matchingRates.length > 0) msp = Math.max(...matchingRates.map(m => m.mspRate));
+          }
+          const variance = msp > 0 ? ratePerSft - msp : 0;
+          const mspFlag = msp === 0 ? 'NO MSP' : variance < 0 ? 'BELOW MSP' : 'AT/ABOVE MSP';
+          return { ...row, MSP_Rate: msp, MSP_Variance: variance, MSP_Flag: mspFlag };
+        });
+        setExtractedData(enriched);
+        setUnitStats({ total: data.total_unit_count, sold: data.sold_units, unsold: data.unsold_units });
+        setActiveTab('All');
+
+        // Fresh analysis on a revised MIS — any earlier submission (e.g. a rejected
+        // one) for this month is now stale. Reset local submission state so the
+        // Maker sees a plain "Submit for Review" action, not the old Rejected
+        // banner or a disabled "already submitted" button.
+        setCurrentSubmissionStatus(null);
+        setMisRejectionInfo(null);
+        setMakerSubmissionDoc(null);
+        setShowMakerDetails(false);
+        if (enriched?.length > 0) {
+          const cols = {};
+          const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
+            'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
+            'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+            'Amount Received excl. Tax'];
+          const allKeys = new Set();
+          enriched.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+          allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+          setVisibleColumns(cols);
+        }
+      } else {
+        alert('Error during comparison: ' + (data.message || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error during comparison: ' + err.message);
+    } finally {
       setIsProcessing(false);
-      return;
     }
-
-    const formData = new FormData();
-    formData.append("prev_month", prevFile);
-    formData.append("curr_month", files.curr);
-
-    const res = await fetch(`${apiUrl}/api/mis-analysis/compare`, { method: "POST", body: formData });
-    const data = await res.json();
-
-    if (data.status === "success") {
-  const mspRates = mspData?.rates || [];
-  const enriched = (data.extracted_data || []).map(row => {
-    if (row.Status !== 'NEW' || !isUnitSold(row["Customer Name"])) return row;
-    const tower = String(row["Tower"] || '').trim().toLowerCase();
-    const unitType = String(row["Unit Type"] || '').trim().toLowerCase();
-    const ratePerSft = getNum(row["Rate per sft"]);
-    const unitNo = String(row["Unit No."] || '').trim().toLowerCase();
-    const unitLevelMatch = mspRates.find(m => String(m.unitNo || '').trim().toLowerCase() === unitNo);
-    let msp = 0;
-    if (unitLevelMatch) {
-      msp = unitLevelMatch.mspRate;
-    } else {
-      const matchingRates = mspRates.filter(m => {
-        const mTower = String(m.tower || '').trim().toLowerCase();
-        const mType = String(m.unitType || '').trim().toLowerCase();
-        const typeMatches = mType === unitType ||
-          (unitType === 'shop' && mType === 'commercial') ||
-          (unitType === 'commercial' && mType === 'shop');
-        const towerMatches = mTower === tower || mTower.startsWith(tower);
-        return towerMatches && typeMatches;
-      });
-      if (matchingRates.length > 0) msp = Math.max(...matchingRates.map(m => m.mspRate));
-    }
-    const variance = msp > 0 ? ratePerSft - msp : 0;
-    const mspFlag = msp === 0 ? 'NO MSP' : variance < 0 ? 'BELOW MSP' : 'AT/ABOVE MSP';
-    return { ...row, MSP_Rate: msp, MSP_Variance: variance, MSP_Flag: mspFlag };
-  });
-  setExtractedData(enriched);
-      setUnitStats({ total: data.total_unit_count, sold: data.sold_units, unsold: data.unsold_units });
-      setActiveTab('All');
-      if (enriched?.length > 0) {
-  const cols = {};
-  const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
-    'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-    'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
-  
-  // Collect ALL keys from ALL rows so MSP fields from NEW rows are included
-  const allKeys = new Set();
-  enriched.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
-  allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
-  
-  setVisibleColumns(cols);
-}
-    }
-  } catch (err) {
-    console.error(err);
-    alert('Error during comparison: ' + err.message);
-  } finally {
-    setIsProcessing(false);
-    setFrozenFileLoading(false);
-  }
-};
+  };
 
   const handleSubmitForReview = async () => {
     if (!monthYear) { alert('Please enter Current Month & Year before submitting'); return; }
-    if (!extractedData.length) { alert('Please run comparison first'); return; }
+    if (!extractedData.length) { alert('Please run analysis first'); return; }
+    if (cycleStateData?.sanityCheckPassed === false && !makerCommentRef.current?.trim() && Object.keys(rowRemarks).length === 0 && Object.keys(rowAttachmentURLs).length === 0) {
+      alert('Sanity Check failed for this month. Please add a remark or attach a supporting document before submitting.');
+      return;
+    }
     setActionLoading(true);
-    // Upload current month file to Storage first
-let currFileURL = "";
-try {
-  const uploadRef = ref(storage, `projects/${selectedProject.projectId}/pendingMIS/${monthYear}.xlsx`);
-  await uploadBytes(uploadRef, files.curr, {
-    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  currFileURL = await getDownloadURL(uploadRef);
-} catch (uploadErr) {
-  console.error("File upload error:", uploadErr);
-}
+    // Curr file already lives in the approved Sanity submission's storage —
+    // just reuse that URL instead of re-uploading a file we no longer hold locally.
+    let currFileURL = cycleStateData?.stagedCurrURL || "";
+    if (!currFileURL) {
+      try {
+        const sanityForMonth = await getSanityForAnalysis(selectedProject.projectId, monthYear);
+        currFileURL = sanityForMonth?.currFileURL || "";
+      } catch (uploadErr) {
+        console.error("Fetching sanity currFileURL error:", uploadErr);
+      }
+    }
 
 const enrichedWithRemarks = extractedData.map(row => ({
   ...row,
   makerRemark: rowRemarks[row["Unit No."]] || "",
   makerAttachments: rowAttachmentURLs[row["Unit No."]] || [],
+  anomalyType: anomalyClassification[row["Unit No."]] || row.anomalyType || "",
+  anomalyRemark: anomalyRemarks[row["Unit No."]] || row.anomalyRemark || "",
+  anomalyAttachments: anomalyAttachmentURLs[row["Unit No."]] || row.anomalyAttachments || [],
 }));
 
 const result = await submitMISForReview(selectedProject.projectId, monthYear, {
@@ -700,12 +845,11 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
   submittedBy: currentUser.email,
   monthYear,
   currFileURL,
+  sanityCheckPassed: cycleStateData?.sanityCheckPassed ?? null,
 });
     if (result.success) {
       setCurrentSubmissionStatus('PENDING_REVIEW');
       makerCommentRef.current = '';
-      localStorage.setItem("misSubmitted", JSON.stringify(true));
-      window.dispatchEvent(new Event("storage"));
       alert('✅ Submitted for Review successfully!');
     } else {
       alert('Error submitting: ' + result.error);
@@ -752,27 +896,41 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       );
 
       if (submissionDoc?.currFileURL) {
-        // If Maker uploaded and we stored the URL
         const response = await fetch(submissionDoc.currFileURL);
         const blob = await response.blob();
         const file = new File([blob], `${selectedSubmission.monthYear}.xlsx`, {
           type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
-        await uploadFrozenMISFile(
+        // Freeze into the single frozenSanityMIS lineage (replaces old frozenMIS store)
+        await uploadFrozenSanityFile(
           selectedProject.projectId,
           selectedSubmission.monthYear,
-          file
+          file,
+          selectedProject.projectName
         );
       }
     } catch (storageErr) {
-      console.error("Storage upload error:", storageErr);
-    }
+        console.error("Storage upload error:", storageErr);
+      }
 
-    // Lock MIS Analysis again — Sanity must be re-run for next month
-    localStorage.removeItem("sanityPassed");
-    localStorage.removeItem("misSubmitted");
-    window.dispatchEvent(new Event("storage"));
-    alert('✅ Final Approved! Month is now frozen. MIS Analysis is now locked for next month cycle.');
+      try {
+        await markSanityAnalysisApproved(selectedProject.projectId, selectedSubmission.monthYear);
+      } catch (e) {
+        console.error("markSanityAnalysisApproved error:", e);
+      }
+
+      // Reset cycle state for next month — this month is now the frozen,
+      // official MIS record.
+      const { setCycleState } = await import("../services/cycleStateService");
+      await setCycleState(selectedProject.projectId, {
+        analysisUnlocked: false,
+        sanityCheckPassed: null,
+        stagedCurrURL: "",
+        stagedPrevURL: "",
+        misApprovedMonth: monthYear,
+        misApprovedAt: new Date().toISOString(),
+      });
+      alert('✅ Final Approved! Month is now frozen. MIS Analysis is now locked for next month cycle.');
   } else {
     await managerRejectMIS(
       selectedProject.projectId,
@@ -792,8 +950,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     const groups = [
       { name: "All Data", data: extractedData },
       { name: "New Bookings", data: extractedData.filter(r => r.Status === 'NEW') },
-      { name: "Transfers", data: extractedData.filter(r => r.Status === 'TRANSFER') },
-      { name: "Anomaly", data: extractedData.filter(r => r.Status === 'ANOMALY') },
+      { name: "Resale-Anomaly", data: extractedData.filter(r => r.is_resale === true) },
       { name: "Name Corrections", data: extractedData.filter(r => r.Status === 'NAME_CORRECTION') },
       { name: "Cancelled", data: extractedData.filter(r => r.Status === 'CANCELLATION') },
     ];
@@ -801,7 +958,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ Info: "No records" }]);
       XLSX.utils.book_append_sheet(wb, ws, name);
     });
-    XLSX.writeFile(wb, `MIS_Analysis_${files.curr?.name?.replace(/\.[^/.]+$/, "") || "Result"}.xlsx`);
+    XLSX.writeFile(wb, `MIS_Analysis_${monthYear || "Result"}.xlsx`);
   };
 
 
@@ -972,37 +1129,38 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
               <span className="text-emerald-600 text-xs font-bold">{row["Customer Name"]}</span>
             </div>
           );
-          if (label === "TRANSFER") {
-  // Parse directly from the full original val string using regex
-  // because the outer filter already stripped Customer: and PrevOccupant: segments
-  const fromUnit = val.match(/Unit\s+(\S+)\s*→\s*Unit/)?.[1];
-  const toUnit = val.match(/→\s*Unit\s+(\S+)/)?.[1];
-  const prevOccupant = val.match(/PrevOccupant:\s*([^|]+)/)?.[1]?.trim();
-  const currCustomer = String(row["Customer Name"] || '').trim();
-  return (
-    <div key={idx} className="flex flex-col gap-1 border-l-2 border-blue-400 pl-3">
-      <span className="text-[10px] font-black text-blue-600 uppercase">Unit Transfer</span>
-      {fromUnit && toUnit && fromUnit !== toUnit && (
-        <span className="text-gray-400 text-xs font-semibold">{fromUnit} → {toUnit}</span>
-      )}
-      <div className="flex items-center gap-1 text-xs">
-        <span className="line-through text-gray-400">{prevOccupant || 'Unsold'}</span>
-        <ArrowRight size={10} className="text-gray-400" />
-        <span className="text-blue-600 font-bold">{currCustomer}</span>
-      </div>
-    </div>
-  );
-}
-          if (label === "ANOMALY") return (
-            <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
-              <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale</span>
-              <div className="flex items-center gap-1 text-xs">
-                <span className="line-through text-red-400">{cleanPart.split('→')[0]?.trim()}</span>
-                <ArrowRight size={10} className="text-gray-400" />
-                <span className="text-purple-600 font-bold">{cleanPart.split('→')[1]?.trim()}</span>
+          if (label === "ANOMALY") {
+            const isCrossUnit = /Unit\s+\S+\s*→\s*Unit/.test(val);
+            if (isCrossUnit) {
+              const fromUnit = val.match(/Unit\s+(\S+)\s*→\s*Unit/)?.[1];
+              const toUnit = val.match(/→\s*Unit\s+(\S+)/)?.[1];
+              const prevOccupant = val.match(/PrevOccupant:\s*([^|]+)/)?.[1]?.trim();
+              const currCustomer = String(row["Customer Name"] || '').trim();
+              return (
+                <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
+                  <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale (Unit Change)</span>
+                  {fromUnit && toUnit && fromUnit !== toUnit && (
+                    <span className="text-gray-400 text-xs font-semibold">{fromUnit} → {toUnit}</span>
+                  )}
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="line-through text-gray-400">{prevOccupant || 'Unsold'}</span>
+                    <ArrowRight size={10} className="text-gray-400" />
+                    <span className="text-purple-600 font-bold">{currCustomer}</span>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={idx} className="flex flex-col gap-1 border-l-2 border-purple-400 pl-3">
+                <span className="text-[10px] font-black text-purple-600 uppercase">Anomaly / Resale</span>
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="line-through text-red-400">{cleanPart.split('→')[0]?.trim()}</span>
+                  <ArrowRight size={10} className="text-gray-400" />
+                  <span className="text-purple-600 font-bold">{cleanPart.split('→')[1]?.trim()}</span>
+                </div>
               </div>
-            </div>
-          );
+            );
+          }
           if (label === "NAME CORRECTION") return (
             <div key={idx} className="flex flex-col gap-1 border-l-2 border-teal-400 pl-3">
               <span className="text-[10px] font-black text-teal-600 uppercase">Name Correction</span>
@@ -1011,6 +1169,11 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
                 <ArrowRight size={10} className="text-gray-400" />
                 <span className="text-teal-600 font-bold">{cleanPart.split('→')[1]?.trim()}</span>
               </div>
+            </div>
+          );
+          if (label === "TRANSFER") return (
+            <div key={idx} className="flex flex-col gap-1 border-l-2 border-blue-400 pl-3">
+              <span className="text-[10px] font-black text-blue-600 uppercase">Transfer</span>
             </div>
           );
           const arrowParts = cleanPart.split('→');
@@ -1055,7 +1218,7 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       if (!allowed.includes(h)) return null;
     }
     return visibleColumns[h] && (
-      <th key={h} className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{h}</th>
+      <th key={h} className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">{COLUMN_LABELS[h] || h}</th>
     );
   });
 
@@ -1155,7 +1318,7 @@ return (
                   <input type="file" className="hidden" onChange={async e => {
                     if (!e.target.files[0]) return;
                     const file = e.target.files[0];
-                    const uploadRef = ref(storage, `projects/${selectedProject.projectId}/reviewerAttachments/${row["Unit No."]}_${file.name}`);
+                    const uploadRef = ref(storage, `projects/${selectedProject.projectName || selectedProject.projectId}/reviewerAttachments/${row["Unit No."]}_${file.name}`);
                     await uploadBytes(uploadRef, file);
                     const url = await getDownloadURL(uploadRef);
                     const docRef = doc(db, "projects", selectedProject.projectId, "misSubmissions", selectedSubmission.monthYear);
@@ -1173,6 +1336,52 @@ return (
                 </label>
               )}
               {(row.reviewerAttachments || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline">{att.name}</a>
+              ))}
+            </div>
+          )}
+        </td>
+      )}
+      {activeTab === 'Resale / Anomaly' && (
+        <td className="p-4 min-w-[280px] align-top">
+          {isMaker && currentSubmissionStatus !== 'PENDING_REVIEW' && currentSubmissionStatus !== 'PENDING_MANAGER' && currentSubmissionStatus !== 'APPROVED' ? (
+            <div className="flex flex-col gap-2">
+              <select
+                value={anomalyClassification[row["Unit No."]] || ""}
+                onChange={e => setAnomalyClassification(prev => ({ ...prev, [row["Unit No."]]: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-400 bg-white">
+                <option value="">Select type...</option>
+                <option value="TRANSFER">Transfer</option>
+                <option value="RESALE">Resale</option>
+                <option value="OTHER">Other</option>
+              </select>
+              <textarea
+                placeholder="Add remark..."
+                value={anomalyRemarks[row["Unit No."]] || ""}
+                onChange={e => setAnomalyRemarks(prev => ({ ...prev, [row["Unit No."]]: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs resize-none focus:outline-none focus:border-purple-400"
+                rows={2}
+              />
+              <label className="flex items-center gap-1 cursor-pointer text-xs text-purple-600 font-bold">
+                <Upload size={12} />
+                Attach Doc
+                <input type="file" className="hidden" onChange={e => { if (e.target.files[0]) handleAnomalyAttachmentUpload(row["Unit No."], e.target.files[0]); }} />
+              </label>
+              {(anomalyAttachmentURLs[row["Unit No."]] || []).map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline truncate max-w-[200px]">{att.name}</a>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {(row.anomalyType || anomalyClassification[row["Unit No."]]) && (
+                <span className="text-[9px] font-black px-2 py-1 rounded border bg-purple-50 text-purple-600 border-purple-300 uppercase w-fit">
+                  {row.anomalyType || anomalyClassification[row["Unit No."]]}
+                </span>
+              )}
+              {(row.anomalyRemark || anomalyRemarks[row["Unit No."]]) && (
+                <p className="text-xs text-gray-700 italic">"{row.anomalyRemark || anomalyRemarks[row["Unit No."]]}"</p>
+              )}
+              {(row.anomalyAttachments || anomalyAttachmentURLs[row["Unit No."]] || []).map((att, i) => (
                 <a key={i} href={att.url} target="_blank" rel="noreferrer" className="text-xs text-purple-500 underline">{att.name}</a>
               ))}
             </div>
@@ -1452,26 +1661,39 @@ return (
     </div>
   );
 
-  // Sanity Gate
-  const misSubmittedLocal = (() => { try { return JSON.parse(localStorage.getItem("misSubmitted")) || false; } catch { return false; } })();
-  if (isMaker && !sanityPassed && !misSubmittedLocal) {
-    return (
-      <Layout title="MIS Analysis">
-        <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-4">
-            <ShieldX size={32} className="text-red-500" />
-          </div>
-          <h2 className="text-gray-800 font-bold text-xl mb-2">Access Restricted</h2>
-          <p className="text-gray-400 text-sm max-w-sm">MIS Analysis is locked until the Sanity Check passes.</p>
-          <button onClick={() => navigate("/mis-sanity")}
-            className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition">
-            Go to MIS Sanity Check
-          </button>
-        </div>
-      </Layout>
-    );
-  }
+  // Sanity Gate — purely driven by Firestore cycle state now (no localStorage bypass)
 
+if (isMaker && cycleLoading) {
+  return (
+    <Layout title="MIS Analysis">
+      <div className="flex items-center justify-center h-[60vh]">
+        <p className="text-gray-400 text-sm">Checking access...</p>
+      </div>
+    </Layout>
+  );
+}
+
+const isMisLocked = false;
+
+if (isMisLocked) {
+  return (
+    <Layout title="MIS Analysis">
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+        <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mb-4">
+          <ShieldX size={32} className="text-red-500" />
+        </div>
+        <h2 className="text-gray-800 font-bold text-xl mb-2">Access Restricted</h2>
+        <p className="text-gray-400 text-sm max-w-sm">
+          MIS Analysis is locked. Complete Sanity Check or wait for Manager approval.
+        </p>
+        <button onClick={() => navigate("/mis-sanity")}
+          className="mt-6 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition">
+          Go to MIS Sanity Check
+        </button>
+      </div>
+    </Layout>
+  );
+}
   const hasData = extractedData.length > 0;
 
   // ── Shared analysis render (used by all roles) ────────────────────────────────
@@ -1716,8 +1938,7 @@ const planned = bpTargets.planned_collection;
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
         {[
           { label: 'New Bookings', value: extractedData.filter(r => r.Status === 'NEW').length, color: 'text-emerald-600', tab: 'New Bookings' },
-          { label: 'Transfers', value: extractedData.filter(r => r.Status === 'TRANSFER').length, color: 'text-blue-500', tab: 'Transfers' },
-          { label: 'Anomaly', value: extractedData.filter(r => r.Status === 'ANOMALY').length, color: 'text-purple-600', tab: 'Anomaly' },
+          { label: 'Resale / Anomaly', value: extractedData.filter(r => r.is_resale === true).length, color: 'text-purple-600', tab: 'Resale / Anomaly' },
           { label: 'Name Corrections', value: extractedData.filter(r => r.Status === 'NAME_CORRECTION').length, color: 'text-pink-500', tab: 'Name Corrections' },
           { label: 'Cancellations', value: auditTotals.cancellations, color: 'text-red-500', tab: 'Cancellations' },
           { label: 'Demand ↑', value: '₹' + formatValue(auditTotals.demandIncrement), color: 'text-orange-500', tab: 'Demand Raised Change' },
@@ -2090,6 +2311,9 @@ const planned = bpTargets.planned_collection;
                   {activeTab === 'New Bookings' && (
                     <th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>
                   )}
+                  {activeTab === 'Resale / Anomaly' && (
+                    <th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Classification & Remarks</th>
+                  )}
                 </tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
@@ -2101,7 +2325,7 @@ const planned = bpTargets.planned_collection;
           <div className="mt-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: '500px' }}>
             <table className="w-full text-left border-collapse min-w-max">
               <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}</tr>
+                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}{activeTab === 'Resale / Anomaly' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Classification & Remarks</th>)}</tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
             </table>
@@ -2111,7 +2335,7 @@ const planned = bpTargets.planned_collection;
           <div className="mt-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-auto" style={{ maxHeight: '500px' }}>
             <table className="w-full text-left border-collapse min-w-max">
               <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
-                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}</tr>
+                <tr><th className="p-4 font-black uppercase text-[10px] text-gray-500">Status</th>{renderTableHeaders()}{activeTab === 'New Bookings' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Remarks & Attachments</th>)}{activeTab === 'Resale / Anomaly' && (<th className="p-4 font-black uppercase text-[10px] whitespace-nowrap text-gray-500">Classification & Remarks</th>)}</tr>
               </thead>
               <tbody>{renderTableRows()}</tbody>
             </table>
@@ -2200,18 +2424,23 @@ const planned = bpTargets.planned_collection;
           </div>
 
           {/* Submission Status Tracking Card — shown when submitted */}
-          {(currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
+          {(currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_REVIEWER') && (
             <div className="mb-6">
               <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3">Your MIS Submission — {monthYear}</p>
-              <div className={`bg-white border rounded-2xl p-5 shadow-sm ${currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' ? 'border-amber-300' : 'border-red-300'}`}>
+              <div
+                onClick={() => setShowMakerDetails(prev => !prev)}
+                className={`bg-white border rounded-2xl p-5 shadow-sm cursor-pointer hover:shadow-md transition-all ${currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER' ? 'border-amber-300' : 'border-red-300'}`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-black text-gray-900 text-base">{monthYear}</p>
                     <p className="text-xs text-gray-400 mt-0.5">Submitted by: {currentUser?.email} · {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                   </div>
-                  <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[currentSubmissionStatus]?.color}`}>
-                    {STATUS_CONFIG[currentSubmissionStatus]?.label}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[currentSubmissionStatus]?.color}`}>
+                      {STATUS_CONFIG[currentSubmissionStatus]?.label}
+                    </span>
+                    <ArrowRight size={14} className={`text-gray-400 transition-transform ${showMakerDetails ? 'rotate-90' : ''}`} />
+                  </div>
                 </div>
                 {currentSubmissionStatus === 'PENDING_REVIEW' && (
                   <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
@@ -2223,52 +2452,51 @@ const planned = bpTargets.planned_collection;
                     <p className="text-xs font-bold text-blue-700">⏳ Reviewer approved. Waiting for Manager final approval.</p>
                   </div>
                 )}
-                {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
-                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
-                    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-upload and resubmit.</p>
-                  </div>
-                )}
+                {currentSubmissionStatus === 'REJECTED_BY_REVIEWER' && (
+  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+    <p className="text-xs font-bold text-red-600">❌ Submission rejected. Please re-upload and resubmit.</p>
+  </div>
+)}
+{currentSubmissionStatus === 'REJECTED_BY_MANAGER' && (
+  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+    <p className="text-xs font-bold text-red-600">⏳ Manager rejected — waiting for Reviewer to review and send back to you.</p>
+  </div>
+)}
+
+{makerSubmissionDoc?.commentHistory?.length > 0 && (
+  <div className="mt-3 pt-3 border-t border-gray-100 space-y-1">
+    {[...makerSubmissionDoc.commentHistory]
+      .sort((a, b) => new Date(a.at) - new Date(b.at))
+      .map((h, i) => {
+        const roleColor = h.role === 'MAKER' ? 'text-blue-600' : h.role === 'REVIEWER' ? 'text-purple-600' : 'text-emerald-600';
+        const icon = h.action === 'REJECTED' ? '❌' : h.action === 'APPROVED' ? '✅' : '💬';
+        return h.comment ? (
+          <p key={i} className={`text-xs italic ${roleColor}`}>
+            {icon} {h.role.charAt(0) + h.role.slice(1).toLowerCase()}: "{h.comment}"
+          </p>
+        ) : null;
+      })}
+  </div>
+)}
               </div>
             </div>
           )}
 
-          {/* Upload */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-  {/* Previous Month — show frozen info OR upload box */}
-  <div>
-    <p className="text-sm font-semibold text-gray-600 mb-2">Previous Month MIS</p>
-    {frozenMISMetadata ? (
-      <div className="border-2 border-dashed border-green-400 bg-green-50 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
-        <CheckCircle size={40} className="text-green-500 mb-3" />
-        <p className="text-green-700 font-bold text-sm">Auto-loaded from Frozen MIS</p>
-        <p className="text-green-600 font-semibold text-xs mt-1">{frozenMISMetadata.monthYear}.xlsx</p>
-        <p className="text-gray-400 text-xs mt-2">
-          Frozen on: {new Date(frozenMISMetadata.frozenAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-        </p>
-        {frozenFileLoading && (
-          <p className="text-blue-500 text-xs mt-2 font-bold animate-pulse">Downloading from Firebase...</p>
-        )}
-        {frozenFileLoaded && (
-          <p className="text-emerald-600 text-xs mt-2 font-bold">✓ Downloaded & Ready</p>
-        )}
-      </div>
-    ) : (
-      <FileUploadBox label="Upload Previous Sheet" subtitle="Last month's MIS Excel file"
-        file={files.prev} accent="blue"
-        onFileSelect={(f) => setFiles(p => ({ ...p, prev: f }))}
-        onClear={() => setFiles(p => ({ ...p, prev: null }))} />
-    )}
-  </div>
-
-  {/* Current Month — always upload */}
-  <div>
-    <p className="text-sm font-semibold text-gray-600 mb-2">Current Month MIS</p>
-    <FileUploadBox label="Upload Current Sheet" subtitle="This month's MIS Excel file"
-      file={files.curr} accent="indigo"
-      onFileSelect={(f) => setFiles(p => ({ ...p, curr: f }))}
-      onClear={() => setFiles(p => ({ ...p, curr: null }))} />
-  </div>
-</div>
+          {/* Auto-loaded month banner */}
+          <div className="bg-white p-5 rounded-2xl border border-blue-200 shadow-sm mb-6 flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center shrink-0">
+              <FileSpreadsheet size={22} className="text-blue-600" />
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-widest text-gray-400">Sanity-Approved Month Ready For Analysis</p>
+              <p className="text-lg font-black text-gray-900">
+                {cycleStateData?.cycleMonth || "No approved month found"}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Files are auto-loaded from the approved Sanity Check submission — no upload needed.
+              </p>
+            </div>
+          </div>
 
           {currentSubmissionStatus === 'APPROVED' && (
             <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-center gap-3">
@@ -2283,18 +2511,54 @@ const planned = bpTargets.planned_collection;
 
           
           <div className="flex justify-center mb-8">
-            <button onClick={runComparison} disabled={(!files.prev && !frozenMISMetadata) || !files.curr || isProcessing || currentSubmissionStatus === 'APPROVED'}
+            <button onClick={autoRunAnalysis} disabled={!cycleStateData?.cycleMonth || isProcessing || currentSubmissionStatus === 'APPROVED'}
   className={`flex items-center gap-3 px-10 py-3.5 rounded-xl font-bold text-sm transition-all
-    ${(files.prev || frozenMISMetadata) && files.curr && !isProcessing && currentSubmissionStatus !== 'APPROVED'
+    ${cycleStateData?.cycleMonth && !isProcessing && currentSubmissionStatus !== 'APPROVED'
       ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200 hover:scale-105 active:scale-95"
       : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}>
-              {isProcessing ? "Analyzing..." : "Compare & Extract Delta"}
+              {isProcessing ? `Analyzing ${cycleStateData?.cycleMonth || ""}...` : `Analyze ${cycleStateData?.cycleMonth || ""}`}
               <ArrowRight size={18} />
             </button>
           </div>
+
+          {/* All Your MIS Submissions — click any month to view it */}
+          {allSubmissions.length > 0 && (
+            <div className="mb-8">
+              <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3">All MIS Submissions</p>
+              <div className="space-y-3">
+                {allSubmissions.map((sub, idx) => (
+                  <div key={idx}
+                    onClick={() => {
+                      setMonthYear(sub.monthYear || '');
+                      setShowMakerDetails(true);
+                    }}
+                    className={`bg-white border rounded-2xl p-5 cursor-pointer hover:border-blue-300 transition-all shadow-sm
+                      ${monthYear === sub.monthYear ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-black text-gray-900 text-base">{sub.monthYear}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Submitted: {new Date(sub.submittedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[sub.status]?.color}`}>
+                          {STATUS_CONFIG[sub.status]?.label}
+                        </span>
+                        {monthYear === sub.monthYear && (
+                          <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded-lg">Viewing</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {hasData && (
             <>
-              {currentSubmissionStatus !== 'APPROVED' && (
+              {currentSubmissionStatus !== 'APPROVED' && (currentSubmissionStatus === null || currentSubmissionStatus === undefined || showMakerDetails) && (
                 <div className="bg-white border border-blue-200 rounded-2xl p-5 shadow-sm mb-6">
                   <div className="flex items-center gap-2 mb-3">
                     <Send size={16} className="text-blue-600" />
@@ -2306,27 +2570,50 @@ const planned = bpTargets.planned_collection;
                     )}
                   </div>
 
-                  {/* Rejection comment display */}
+                  {/* Rejection comment display + redo-sanity option */}
                   {(currentSubmissionStatus === 'REJECTED_BY_REVIEWER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER') && (
                     <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
-                      <p className="text-xs font-bold text-red-600 mb-1">Rejection Reason:</p>
-                      <p className="text-xs text-red-500 italic">Check with your Reviewer/Manager for details.</p>
+                      <p className="text-xs font-bold text-red-600 mb-1">
+                        Rejected by {currentSubmissionStatus === 'REJECTED_BY_MANAGER' ? 'Manager' : 'Reviewer'}:
+                      </p>
+                      <p className="text-xs text-red-500 italic">
+                        {misRejectionInfo?.rejectionComment || "No reason provided."}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-2 mb-3">
+                        Add a remark below and resubmit this analysis as-is, or if the underlying MIS data
+                        itself needs correction, revise it in Sanity Check first.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/mis-sanity")}
+                        className="w-full flex items-center justify-center gap-2 bg-white border-2 border-dashed border-blue-300 hover:border-blue-500 hover:bg-blue-50 text-blue-600 font-bold text-sm px-4 py-3 rounded-xl transition-all group">
+                        <Upload size={15} className="group-hover:-translate-y-0.5 transition-transform" />
+                        Click to Upload Revised MIS
+                        <ArrowRight size={14} />
+                      </button>
                     </div>
                   )}
 
+                  {cycleStateData?.sanityCheckPassed === false && (
+                    <p className="text-xs font-bold text-rose-600 mb-2">
+                      ⚠ Sanity Check failed this month — a remark or attachment is required before you can submit.
+                    </p>
+                  )}
                   <textarea
                     defaultValue=""
                     onChange={e => { makerCommentRef.current = e.target.value; }}
-                    placeholder="Add a comment for the Reviewer (optional)..."
+                    placeholder={cycleStateData?.sanityCheckPassed === false
+                      ? "Required: explain the Sanity Check failure, or reference your attachment..."
+                      : "Add a comment for the Reviewer (optional)..."}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:outline-none focus:border-blue-400 resize-none mb-3"
                     rows={2}
-                    disabled={currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER'}
+                    disabled={currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER'}
                   />
                   <button
                     onClick={handleSubmitForReview}
-                    disabled={!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER'}
+                    disabled={!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER'}
                     className={`w-full font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm
-                      ${(!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER')
+                      ${(!monthYear || actionLoading || currentSubmissionStatus === 'PENDING_REVIEW' || currentSubmissionStatus === 'PENDING_MANAGER' || currentSubmissionStatus === 'REJECTED_BY_MANAGER')
                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
                     {actionLoading ? 'Submitting...' :
@@ -2337,7 +2624,7 @@ const planned = bpTargets.planned_collection;
                 </div>
               )}
 
-              {renderAnalysis()}
+              {(currentSubmissionStatus === null || currentSubmissionStatus === undefined || showMakerDetails) && renderAnalysis()}
             </>
           )}
         </>
@@ -2374,7 +2661,8 @@ const planned = bpTargets.planned_collection;
                         const cols = {};
                         const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
                           'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
-                          'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP'];
+                          'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+                          'Amount Received excl. Tax'];
                         const allSubKeys = new Set();
                         sub.extractedData.forEach(row => Object.keys(row).forEach(k => allSubKeys.add(k)));
                         allSubKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
@@ -2389,15 +2677,42 @@ const planned = bpTargets.planned_collection;
                         <p className="text-xs text-gray-400 mt-0.5">
                           Submitted by: {sub.submittedBy} · {new Date(sub.submittedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </p>
-                        {sub.makerComment && (
-                          <p className="text-xs text-blue-600 mt-1 italic">💬 "{sub.makerComment}"</p>
+                        {sub.commentHistory?.length > 0 ? (
+                          <div className="mt-2 space-y-1">
+                            {[...sub.commentHistory]
+                              .sort((a, b) => new Date(a.at) - new Date(b.at))
+                              .map((h, i) => {
+                                const roleColor = h.role === 'MAKER' ? 'text-blue-600' : h.role === 'REVIEWER' ? 'text-purple-600' : 'text-emerald-600';
+                                const icon = h.action === 'REJECTED' ? '❌' : h.action === 'APPROVED' ? '✅' : '💬';
+                                return h.comment ? (
+                                  <p key={i} className={`text-xs italic ${roleColor}`}>
+                                    {icon} {h.role.charAt(0) + h.role.slice(1).toLowerCase()}: "{h.comment}"
+                                  </p>
+                                ) : null;
+                              })}
+                          </div>
+                        ) : (
+                          <>
+                            {sub.makerComment && (
+                              <p className="text-xs text-blue-600 mt-1 italic">💬 "{sub.makerComment}"</p>
+                            )}
+                            {sub.reviewerComment && (
+                              <p className="text-xs text-purple-600 mt-1 italic">👁 Reviewer: "{sub.reviewerComment}"</p>
+                            )}
+                            {sub.rejectionComment && (
+                              <p className="text-xs text-red-500 mt-1 italic">❌ Rejected: "{sub.rejectionComment}"</p>
+                            )}
+                          </>
                         )}
-                        {sub.reviewerComment && (
-                          <p className="text-xs text-purple-600 mt-1 italic">👁 Reviewer: "{sub.reviewerComment}"</p>
-                        )}
-                        {sub.rejectionComment && (
-                          <p className="text-xs text-red-500 mt-1 italic">❌ Rejected: "{sub.rejectionComment}"</p>
-                        )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="text-[10px] font-black text-gray-400 uppercase">Sanity Check:</span>
+                          {sub.sanityCheckPassed === true
+                            ? <span className="text-[10px] font-black px-2 py-1 rounded bg-emerald-100 text-emerald-700 border border-emerald-300">✓ Passed</span>
+                            : sub.sanityCheckPassed === false
+                            ? <span className="text-[10px] font-black px-2 py-1 rounded bg-red-100 text-red-700 border border-red-300">⚠ Failed</span>
+                            : <span className="text-[10px] font-black px-2 py-1 rounded bg-gray-100 text-gray-500 border border-gray-300">Not Run</span>
+                          }
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${STATUS_CONFIG[sub.status]?.color}`}>
@@ -2418,12 +2733,21 @@ const planned = bpTargets.planned_collection;
           {selectedSubmission && (
             <>
               {/* Approve/Reject for correct role and status */}
-              {((isReviewer && selectedSubmission.status === 'PENDING_REVIEW') ||
-                (isManager && selectedSubmission.status === 'PENDING_MANAGER')) && (
+              {((isReviewer && (selectedSubmission.status === 'PENDING_REVIEW' || selectedSubmission.status === 'REJECTED_BY_MANAGER')) ||
+  (isManager && selectedSubmission.status === 'PENDING_MANAGER')) && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
                   <p className="text-sm font-black uppercase text-gray-400 mb-3">
                     {isReviewer ? '👁 Reviewer Action' : '✅ Manager Final Action'} — {selectedSubmission.monthYear}
                   </p>
+                  {isReviewer && selectedSubmission.status === 'REJECTED_BY_MANAGER' && (
+  <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+    <p className="text-xs font-bold text-red-600">❌ Manager rejected this submission.</p>
+    {selectedSubmission.rejectionComment && (
+      <p className="text-xs text-red-500 mt-1 italic">💬 Manager's reason: "{selectedSubmission.rejectionComment}"</p>
+    )}
+    <p className="text-xs text-amber-600 mt-2 font-semibold">You can re-send to Manager with your comment, or reject back to Maker.</p>
+  </div>
+)}
                   <textarea
                     defaultValue=""
                     onChange={e => { isReviewer ? reviewerCommentRef.current = e.target.value : managerCommentRef.current = e.target.value; }}
@@ -2437,7 +2761,11 @@ const planned = bpTargets.planned_collection;
                       disabled={actionLoading}
                       className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
                       <ThumbsUp size={15} />
-                      {isReviewer ? 'Approve → Send to Manager' : 'Final Approve & Freeze Month'}
+{isReviewer
+  ? selectedSubmission.status === 'REJECTED_BY_MANAGER'
+    ? 'Re-send to Manager'
+    : 'Approve → Send to Manager'
+  : 'Final Approve & Freeze Month'}
                     </button>
                     <button
                       onClick={() => isReviewer ? handleReviewerAction(false) : handleManagerAction(false)}

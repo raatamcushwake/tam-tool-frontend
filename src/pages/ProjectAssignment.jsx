@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import Layout from "../components/common/Layout";
 import axios from "axios";
-import { Plus, Trash2, FolderKanban, UserCheck } from "lucide-react";
+import { Plus, Trash2, FolderKanban, UserCheck, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 
 const ROLES = ["MAKER", "REVIEWER", "MANAGER"];
 
@@ -29,8 +30,8 @@ export default function ProjectAssignment() {
   const fetchData = async () => {
     try {
       const [usersRes, projectsRes] = await Promise.all([
-        axios.get(`http://127.0.0.1:8000/api/auth/users`),
-        axios.get(`http://127.0.0.1:8000/api/projects`),
+        axios.get(`${import.meta.env.VITE_API_URL}/api/auth/users`),
+        axios.get(`${import.meta.env.VITE_API_URL}/api/projects`),
       ]);
       setUsers(usersRes.data.filter(u => !u.isAdmin));
       setProjects(projectsRes.data);
@@ -48,7 +49,7 @@ export default function ProjectAssignment() {
     if (!newProjectName.trim()) return;
     setCreatingProject(true);
     try {
-      await axios.post(`http://127.0.0.1:8000/api/projects`, {
+      await axios.post(`${import.meta.env.VITE_API_URL}/api/projects`, {
         name: newProjectName.trim(),
       });
       setNewProjectName("");
@@ -67,7 +68,7 @@ export default function ProjectAssignment() {
     try {
       const project = projects.find(p => p.id === selectedProject);
       await axios.post(
-        `http://127.0.0.1:8000/api/auth/user/${selectedUser}/assign-project`,
+        `${import.meta.env.VITE_API_URL}/api/auth/user/${selectedUser}/assign-project`,
         {
           projectId: selectedProject,
           projectName: project?.name || selectedProject,
@@ -87,13 +88,50 @@ export default function ProjectAssignment() {
   const removeRole = async (uid, projectId, role) => {
     try {
       await axios.delete(
-        `http://127.0.0.1:8000/api/auth/user/${uid}/remove-project`,
+        `${import.meta.env.VITE_API_URL}/api/auth/user/${uid}/remove-project`,
         { data: { projectId, role } }
       );
       await fetchData();
     } catch (err) {
       console.error("Error removing role:", err);
     }
+  };
+
+  const exportProjectsToExcel = () => {
+    const rows = projects.map((project) => {
+      const assignedUsers = users.filter((u) =>
+        u.projectRoles?.some((r) => r.projectId === project.id)
+      );
+
+      const maker = assignedUsers.find((u) =>
+        u.projectRoles.some((r) => r.projectId === project.id && r.role === "MAKER")
+      );
+      const reviewer = assignedUsers.find((u) =>
+        u.projectRoles.some((r) => r.projectId === project.id && r.role === "REVIEWER")
+      );
+      const manager = assignedUsers.find((u) =>
+        u.projectRoles.some((r) => r.projectId === project.id && r.role === "MANAGER")
+      );
+
+      return {
+        "Project Name": project.name,
+        "Maker": maker ? `${maker.name} (${maker.email})` : "Not Assigned",
+        "Reviewer": reviewer ? `${reviewer.name} (${reviewer.email})` : "Not Assigned",
+        "Manager": manager ? `${manager.name} (${manager.email})` : "Not Assigned",
+        "Total Assigned Users": assignedUsers.length,
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet["!cols"] = [
+      { wch: 32 }, { wch: 28 }, { wch: 28 }, { wch: 28 }, { wch: 18 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Projects");
+
+    const today = new Date().toISOString().split("T")[0];
+    XLSX.writeFile(workbook, `Project_List_${today}.xlsx`);
   };
 
   const activeUsers = users.filter(
@@ -233,11 +271,21 @@ export default function ProjectAssignment() {
 
           {/* Right — Projects + Assigned Users */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
-            <div className="px-6 py-4 border-b border-gray-100">
-              <h2 className="text-base font-bold text-gray-800">Projects & Assignments</h2>
-              <p className="text-gray-400 text-xs mt-0.5">
-                All projects with their assigned users
-              </p>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-gray-800">Projects & Assignments</h2>
+                <p className="text-gray-400 text-xs mt-0.5">
+                  All projects with their assigned users
+                </p>
+              </div>
+              <button
+                onClick={exportProjectsToExcel}
+                disabled={loading || projects.length === 0}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+              >
+                <Download size={14} />
+                Export Excel
+              </button>
             </div>
 
             {loading ? (

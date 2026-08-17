@@ -17,6 +17,14 @@ import AdminPanel from "./pages/AdminPanel";
 import ProjectAssignment from "./pages/ProjectAssignment";
 import ReferenceUpload from "./pages/ReferenceUpload";
 import AdminTracker from "./pages/AdminTracker";
+import EscrowAnalysis from "./pages/EscrowAnalysis";
+import EscrowCumulativeSummary from "./pages/EscrowCumulativeSummary";
+import EscrowUpload from "./pages/EscrowUpload";
+import EscrowSummary from "./pages/EscrowSummary";
+import EscrowHistory from "./pages/EscrowHistory";
+import CollectionMapping from "./pages/CollectionMapping";
+import CollectionMappingResults from "./pages/CollectionMappingResults";
+// import Approval from "./pages/Approval";
 
 // ─── Route Guards ────────────────────────────────────────────
 
@@ -76,7 +84,6 @@ function AppRoutes() {
         <ProtectedRoute><PendingApproval /></ProtectedRoute>
       } />
 
-      {/* Project Selector */}
       <Route path="/select-project" element={
         <ProtectedRoute><ProjectSelector /></ProtectedRoute>
       } />
@@ -103,6 +110,30 @@ function AppRoutes() {
       <Route path="/projects" element={
         <ActiveRoute><ProjectProgress /></ActiveRoute>
       } />
+      <Route path="/escrow-analysis" element={
+        <ActiveRoute><EscrowAnalysis /></ActiveRoute>
+      } />
+      <Route path="/escrow-cumulative-summary" element={
+  <ActiveRoute><EscrowCumulativeSummary /></ActiveRoute>
+} />
+      <Route path="/escrow-upload" element={
+  <ActiveRoute><EscrowUpload /></ActiveRoute>
+      } />
+      <Route path="/escrow-summary" element={
+  <ActiveRoute><EscrowSummary /></ActiveRoute>
+} />
+      <Route path="/escrow-history" element={
+  <ActiveRoute><EscrowHistory /></ActiveRoute>
+} />
+      <Route path="/collection-mapping" element={
+  <ActiveRoute><CollectionMapping /></ActiveRoute>
+} />
+      <Route path="/collection-mapping/results" element={
+  <ActiveRoute><CollectionMappingResults /></ActiveRoute>
+} />
+      {/* <Route path="/approval-form" element={
+  <ActiveRoute><Approval /></ActiveRoute>
+} /> */}
 
       {/* Admin only */}
       <Route path="/admin" element={

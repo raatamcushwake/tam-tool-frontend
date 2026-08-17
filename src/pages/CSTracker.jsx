@@ -83,6 +83,12 @@ export default function CSTracker() {
       alert("Parse the sheet and enter a period label first.");
       return;
     }
+    const missingRemarks = (parsedData.items || [])
+      .filter(item => item.computed_status === "Pending" && !(rowComments[item.sr_no] || "").trim());
+    if (missingRemarks.length > 0) {
+      alert(`Please add a remark for all Pending rows before submitting. Missing remark for row(s): ${missingRemarks.map(m => m.sr_no).join(", ")}`);
+      return;
+    }
     setActionLoading(true);
     try {
       const fileRef = ref(storage, `projects/${projectStorageKey}/pendingCSBills/${periodLabel.replace(/\s+/g,"_")}.xlsx`);
@@ -91,26 +97,26 @@ export default function CSTracker() {
 
       // Upload attachments first and collect URLs
       const attachmentUrls = {};
-      for (const [idx, files] of Object.entries(rowAttachments)) {
+      for (const [srNo, files] of Object.entries(rowAttachments)) {
   const urls = [];
   const names = [];
   for (const file of files) {
     try {
-      const attRef = ref(storage, `projects/${projectStorageKey}/pendingCSAttachments/${periodLabel.replace(/\s+/g,"_")}_row${idx}_${file.name}`);
+      const attRef = ref(storage, `projects/${projectStorageKey}/pendingCSAttachments/${periodLabel.replace(/\s+/g,"_")}_row${srNo}_${file.name}`);
       await uploadBytes(attRef, file);
       urls.push(await getDownloadURL(attRef));
       names.push(file.name);
     } catch(e) { console.error("Attachment upload failed:", e); }
   }
-  attachmentUrls[idx] = { urls, names };
+  attachmentUrls[srNo] = { urls, names };
 }
 
       // Merge comments and attachment urls into items
-      const enrichedItems = (parsedData.items || []).map((item, i) => ({
+      const enrichedItems = (parsedData.items || []).map((item) => ({
         ...item,
-        comment: rowComments[i] || "",
-        attachment_urls: attachmentUrls[i]?.urls || [],
-attachment_names: attachmentUrls[i]?.names || [],
+        comment: rowComments[item.sr_no] || "",
+        attachment_urls: attachmentUrls[item.sr_no]?.urls || [],
+        attachment_names: attachmentUrls[item.sr_no]?.names || [],
       }));
       const enrichedData = { ...parsedData, items: enrichedItems };
 
@@ -268,8 +274,8 @@ attachment_names: attachmentUrls[i]?.names || [],
                 <td className="px-4 py-3 min-w-[200px]">
                   {isMaker && !selectedSub ? (
                     <textarea
-                      value={rowComments[i] || ""}
-                      onChange={e => setRowComments(p => ({ ...p, [i]: e.target.value }))}
+                      value={rowComments[item.sr_no] || ""}
+                      onChange={e => setRowComments(p => ({ ...p, [item.sr_no]: e.target.value }))}
                       placeholder="Add comment..."
                       className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs resize-none focus:outline-none focus:border-indigo-400"
                       rows={2}
@@ -290,16 +296,16 @@ attachment_names: attachmentUrls[i]?.names || [],
           const files = Array.from(e.target.files);
           setRowAttachments(p => ({
             ...p,
-            [i]: [...(p[i] || []), ...files]
+            [item.sr_no]: [...(p[item.sr_no] || []), ...files]
           }));
         }} />
     </label>
-    {(rowAttachments[i] || []).map((file, fi) => (
+    {(rowAttachments[item.sr_no] || []).map((file, fi) => (
       <div key={fi} className="flex items-center gap-1">
         <span className="text-xs text-gray-600 truncate max-w-[120px]">{file.name}</span>
         <button onClick={() => setRowAttachments(p => ({
           ...p,
-          [i]: p[i].filter((_, idx) => idx !== fi)
+          [item.sr_no]: p[item.sr_no].filter((_, idx) => idx !== fi)
         }))} className="text-red-400 text-xs">✕</button>
       </div>
     ))}

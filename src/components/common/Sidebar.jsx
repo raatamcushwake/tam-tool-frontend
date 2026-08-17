@@ -5,7 +5,8 @@ import { useProject } from "../../context/ProjectContext";
 import {
   LayoutDashboard, FileSpreadsheet, BarChart3, IndianRupee,
   ShieldCheck, ClipboardList, FolderKanban, LogOut,
-  ChevronLeft, ChevronRight, Users, Settings, Upload
+  ChevronLeft, ChevronRight, Users, Settings, Upload, Landmark, Map, FileCheck2, History,
+  ArrowLeftCircle
 } from "lucide-react";
 
 const navItems = [
@@ -15,7 +16,10 @@ const navItems = [
   { path: "/cost-analysis", icon: IndianRupee, label: "Cost Analysis" },
   { path: "/cs-tracker", icon: ShieldCheck, label: "CS Tracker" },
   { path: "/approvals", icon: ClipboardList, label: "Approval Tracker" },
+  // { path: "/approval-form", icon: FileCheck2, label: "Approvals" },
   { path: "/projects", icon: FolderKanban, label: "Project Progress" },
+  { path: "/escrow-analysis", icon: Landmark, label: "Escrow Analysis", roleAware: true },
+  { path: "/collection-mapping", icon: Map, label: "Collection Mapping" },
 ];
 
 const managerItems = [
@@ -37,6 +41,7 @@ const navigate = useNavigate();
 const currentRole = selectedProject?.role;
 const isManager = currentRole === "MANAGER";
 const isMaker = currentRole === "MAKER";
+const isReviewer = currentRole === "REVIEWER";
 
   // Safe localStorage read
   // Reactive localStorage read — re-checks whenever storage changes
@@ -108,6 +113,19 @@ const isMaker = currentRole === "MAKER";
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
 
+        {/* Switch Project (back to project picker) */}
+        {!isAdmin && (
+          <button
+            onClick={() => navigate("/home")}
+            title="Switch Project"
+            className={`w-full flex items-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-600 text-sm font-medium mb-4
+              ${collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5"}`}
+          >
+            <ArrowLeftCircle size={18} />
+            {!collapsed && <span>Switch Project</span>}
+          </button>
+        )}
+
         {/* Main Menu */}
         {!collapsed && !isAdmin && (
           <p className="text-slate-500 text-xs font-semibold uppercase px-2 mb-3">
@@ -118,7 +136,19 @@ const isMaker = currentRole === "MAKER";
         <ul className="space-y-1">
           {!isAdmin && navItems.map((item) => {
             const isMisAnalysis = item.path === "/mis-analysis";
-            const isLocked = isMisAnalysis && isMaker && !sanityPassed && !misSubmitted && !isAdmin;
+            const isLocked = false;
+
+            // Escrow Analysis is actually 3 different pages depending on role/stage:
+            // Manager sets it up (/escrow-analysis), Maker fills it in (/escrow-upload),
+            // Reviewer/anyone else just reviews the read-only summary (/escrow-summary).
+            // Escrow Analysis is actually 3 different pages depending on role/stage:
+            // Manager sets it up (/escrow-analysis), Maker fills it in (/escrow-upload).
+            // Reviewer now also starts at /escrow-analysis (read-only there) and can
+            // walk forward through Maker's data -> Summary -> Cumulative Summary.
+            let resolvedPath = item.path;
+            if (item.roleAware && isMaker) {
+              resolvedPath = "/escrow-upload";
+            }
 
             return (
               <li key={item.path}>
@@ -134,7 +164,7 @@ const isMaker = currentRole === "MAKER";
                   </div>
                 ) : (
                   <NavLink
-                    to={item.path}
+                    to={resolvedPath}
                     title={item.label}
                     className={({ isActive }) =>
   `flex items-center rounded-lg text-sm font-medium transition

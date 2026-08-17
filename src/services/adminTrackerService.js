@@ -5,7 +5,12 @@ export const getAllProjectsWithSubmissions = async (projects) => {
   const results = [];
   for (const project of projects) {
     const projectId = project.projectId || project.id;
+    if (!projectId) {
+      console.warn("Skipping project with no ID:", project);
+      continue;
+    }
     const projectName = project.projectName || project.name || projectId;
+    console.log("PROJECT OBJECT:", project, "→ projectId:", projectId);
 
     // Fetch all 3 submission types in parallel
     const [sanity, mis, cs, approval] = await Promise.all([
@@ -14,6 +19,8 @@ export const getAllProjectsWithSubmissions = async (projects) => {
       getDocs(collection(db, "projects", projectId, "csTrackerSubmissions")),
       getDocs(collection(db, "projects", projectId, "approvalSubmissions")),
     ]);
+
+    console.log("DEBUG:", projectId, "sanity=", sanity.size, "mis=", mis.size, "cs=", cs.size, "approval=", approval.size);
 
     const toRows = (snap, type) =>
       snap.docs.map(d => ({ ...d.data(), _type: type, _projectId: projectId, _projectName: projectName }));

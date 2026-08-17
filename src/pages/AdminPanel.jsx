@@ -10,6 +10,11 @@ export default function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updatingUid, setUpdatingUid] = useState(null);
+  const [resetUid, setResetUid] = useState(null);
+  const [resetEmail, setResetEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
 
   const fetchUsers = async () => {
     try {
@@ -39,6 +44,28 @@ export default function AdminPanel() {
     setUpdatingUid(null);
   };
 
+  const handleResetPassword = async () => {
+    if (!newPassword || newPassword.length < 6) {
+      setResetMessage("Password must be at least 6 characters.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/auth/reset-password`,
+        { uid: resetUid, new_password: newPassword }
+      );
+      setResetMessage("Password reset successfully!");
+      setTimeout(() => {
+        setResetUid(null);
+        setNewPassword("");
+        setResetMessage("");
+      }, 2000);
+    } catch (err) {
+      setResetMessage("Failed to reset password.");
+    }
+    setResetLoading(false);
+  };
   const pendingUsers = users.filter(u => u.status === "PENDING");
   const activeUsers = users.filter(u => u.status === "ACTIVE" || u.status === "active");
 
@@ -174,6 +201,12 @@ export default function AdminPanel() {
                       <span className="bg-purple-100 text-purple-700 text-xs font-medium px-2.5 py-1 rounded-full">Admin</span>
                     )}
                     {statusBadge(user.status)}
+                    <button
+                      onClick={() => { setResetUid(user.uid); setResetEmail(user.email); setResetMessage(""); }}
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-medium px-3 py-1.5 rounded-lg transition"
+                    >
+                      Reset Password
+                    </button>
                   </div>
                 </div>
               ))}
@@ -182,6 +215,44 @@ export default function AdminPanel() {
         </div>
 
       </div>
+
+      {/* Reset Password Modal */}
+      {resetUid && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-base font-bold text-gray-800 mb-1">Reset Password</h3>
+            <p className="text-gray-400 text-xs mb-4">{resetEmail}</p>
+            {resetMessage && (
+              <div className={`text-xs px-3 py-2 rounded-lg mb-3 ${resetMessage.includes("success") ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"}`}>
+                {resetMessage}
+              </div>
+            )}
+            <input
+              type="password"
+              placeholder="Enter new password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleResetPassword}
+                disabled={resetLoading}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold py-2.5 rounded-xl transition"
+              >
+                {resetLoading ? "Saving..." : "Save Password"}
+              </button>
+              <button
+                onClick={() => { setResetUid(null); setNewPassword(""); setResetMessage(""); }}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2.5 rounded-xl transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </Layout>
   );
 }

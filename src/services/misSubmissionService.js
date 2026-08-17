@@ -1,7 +1,7 @@
 import { db, storage } from "./firebase";
 import {
   doc, setDoc, getDoc, collection,
-  query, where, getDocs, updateDoc, orderBy
+  query, where, getDocs, updateDoc, orderBy, arrayUnion
 } from "firebase/firestore";
 import {
   ref, uploadBytes, getDownloadURL, getMetadata
@@ -18,8 +18,8 @@ export const STATUS_CONFIG = {
 // ── Helper: get human-readable storage path from project name ─
 const getStoragePath = async (projectId) => {
   const snap = await getDoc(doc(db, "projects", projectId));
-  const name = snap.data()?.projectName || projectId;
-  return name.trim().replace(/\s+/g, '_');
+  const name = snap.data()?.projectName || snap.data()?.name || projectId;
+  return name.trim();
 };
 
 // ── Submit MIS for Review ─────────────────────────────────────
@@ -31,7 +31,14 @@ export const submitMISForReview = async (projectId, monthYear, payload) => {
       monthYear,
       status: "PENDING_REVIEW",
       submittedAt: new Date().toISOString(),
-    });
+      commentHistory: arrayUnion({
+        role: "MAKER",
+        email: payload.submittedBy,
+        comment: payload.makerComment || "",
+        action: "SUBMITTED",
+        at: new Date().toISOString(),
+      }),
+    }, { merge: true });
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -83,6 +90,13 @@ export const reviewerApproveMIS = async (projectId, monthYear, reviewerEmail, co
     reviewedBy: reviewerEmail,
     reviewedAt: new Date().toISOString(),
     reviewerComment: comment || "",
+    commentHistory: arrayUnion({
+      role: "REVIEWER",
+      email: reviewerEmail,
+      comment: comment || "",
+      action: "APPROVED",
+      at: new Date().toISOString(),
+    }),
   });
 };
 
@@ -94,6 +108,13 @@ export const reviewerRejectMIS = async (projectId, monthYear, reviewerEmail, com
     rejectedBy: reviewerEmail,
     rejectedAt: new Date().toISOString(),
     rejectionComment: comment || "",
+    commentHistory: arrayUnion({
+      role: "REVIEWER",
+      email: reviewerEmail,
+      comment: comment || "",
+      action: "REJECTED",
+      at: new Date().toISOString(),
+    }),
   });
 };
 
@@ -106,6 +127,22 @@ export const managerApproveMIS = async (projectId, monthYear, managerEmail, comm
     approvedBy: managerEmail,
     approvedAt: new Date().toISOString(),
     managerComment: comment || "",
+    commentHistory: arrayUnion({
+      role: "MANAGER",
+      email: managerEmail,
+      comment: comment || "",
+      action: "APPROVED",
+      at: new Date().toISOString(),
+    }),
+  });
+
+  // 🔒 Lock MIS Analysis again — cycle complete
+  const { setCycleState } = await import("./cycleStateService");
+  await setCycleState(projectId, {
+    sanityApproved: false,
+    misAnalysisLocked: true,
+    misApprovedMonth: monthYear,
+    misApprovedAt: new Date().toISOString(),
   });
 };
 
@@ -117,6 +154,13 @@ export const managerRejectMIS = async (projectId, monthYear, managerEmail, comme
     rejectedBy: managerEmail,
     rejectedAt: new Date().toISOString(),
     rejectionComment: comment || "",
+    commentHistory: arrayUnion({
+      role: "MANAGER",
+      email: managerEmail,
+      comment: comment || "",
+      action: "REJECTED",
+      at: new Date().toISOString(),
+    }),
   });
 };
 

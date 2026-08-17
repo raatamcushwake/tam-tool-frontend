@@ -28,7 +28,7 @@ export default function ProjectSelector() {
       projectName: pr.projectName,
       role: pr.role,
     });
-    navigate("/dashboard");
+    navigate("/home");
   };
 
   const handleLogout = async () => {

@@ -12,6 +12,23 @@ export const STATUS_CONFIG = {
   REJECTED_BY_REVIEWER: { label: "Rejected by Reviewer", color: "bg-red-100 text-red-700 border-red-300" },
   REJECTED_BY_MANAGER: { label: "Rejected by Manager", color: "bg-red-100 text-red-700 border-red-300" },
 };
+// Mark that MIS Analysis has been completed for this sanity-approved month
+export const markSanityAnalysisApproved = async (projectId, monthYear) => {
+  try {
+    const docRef = doc(db, "projects", projectId, "misSanitySubmissions", monthYear);
+    await setDoc(docRef, {
+      monthYear,
+      status: "APPROVED",
+      sanityCheckPassed: true,
+      analysisApproved: true,
+      analysisApprovedAt: serverTimestamp(),
+    }, { merge: true });
+    return { success: true };
+  } catch (error) {
+    console.error("markSanityAnalysisApproved error:", error);
+    return { success: false, error: error.message };
+  }
+};
 
 // Submit sanity for review (Maker)
 export const submitSanityForReview = async (projectId, monthYear, payload) => {
@@ -26,6 +43,7 @@ export const submitSanityForReview = async (projectId, monthYear, payload) => {
       makerProofDocuments: payload.makerProofDocuments || [],
       unitAnnotations: payload.unitAnnotations || {},
       currFileURL: payload.currFileURL || "",
+      prevFileURL: payload.prevFileURL || "",
       sanityCheckPassed: payload.sanityCheckPassed,
       issues: payload.issues || [],
       summary: payload.summary || {},
@@ -46,6 +64,7 @@ export const submitSanityForReview = async (projectId, monthYear, payload) => {
       approvedBy: "",
       approvedAt: null,
       rejectionComment: "",
+      analysisApproved: false,
     }, { merge: true });
     return { success: true };
   } catch (error) {
@@ -63,6 +82,28 @@ export const getSanitySubmission = async (projectId, monthYear) => {
     return { id: snap.id, ...snap.data() };
   } catch (error) {
     console.error("getSanitySubmission error:", error);
+    return null;
+  }
+};
+
+// Get approved sanity submission for a month — used by MIS Analysis to auto-load
+export const getApprovedSanityForMonth = async (projectId, monthYear) => {
+  try {
+    const sub = await getSanitySubmission(projectId, monthYear);
+    if (sub && sub.status === "APPROVED") return sub;
+    return null;
+  } catch (error) {
+    console.error("getApprovedSanityForMonth error:", error);
+    return null;
+  }
+};
+// Analysis no longer waits for Sanity approval — it just needs the
+// submission (and its file URLs) to exist for that month, any status.
+export const getSanityForAnalysis = async (projectId, monthYear) => {
+  try {
+    return await getSanitySubmission(projectId, monthYear);
+  } catch (error) {
+    console.error("getSanityForAnalysis error:", error);
     return null;
   }
 };
@@ -130,6 +171,9 @@ export const managerApproveSanity = async (projectId, monthYear, email, comment)
       approvedAt: serverTimestamp(),
       sanityFrozen: true,
     });
+    // Sanity's approval chain is now a record-keeping track only.
+    // It no longer writes cycleState / unlocks Analysis — Analysis unlocks
+    // the moment the check is *run* (see MISSanityCheck.jsx runSanityCheck).
     return { success: true };
   } catch (error) {
     console.error("managerApproveSanity error:", error);
@@ -154,10 +198,16 @@ export const managerRejectSanity = async (projectId, monthYear, email, comment) 
   }
 };
 
-// Upload frozen sanity file (called on Manager approval)
-export const uploadFrozenSanityFile = async (projectId, monthYear, file) => {
+const getStoragePath = async (projectId) => {
+  const snap = await getDoc(doc(db, "projects", projectId));
+  const name = snap.data()?.projectName || snap.data()?.name || projectId;
+  return name.trim();
+};
+
+export const uploadFrozenSanityFile = async (projectId, monthYear, file, projectName) => {
   try {
-    const fileRef = ref(storage, `projects/${projectId}/frozenSanityMIS/${monthYear}.xlsx`);
+    const storagePath = projectName || await getStoragePath(projectId);
+    const fileRef = ref(storage, `projects/${storagePath}/frozenSanityMIS/${monthYear}.xlsx`);
     await uploadBytes(fileRef, file, {
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
@@ -218,11 +268,12 @@ export const isSanityApproved = async (projectId, monthYear) => {
 };
 
 // Upload proof document (Maker or Reviewer)
-export const uploadProofDocument = async (projectId, monthYear, file, uploadedBy = "maker") => {
+export const uploadProofDocument = async (projectId, monthYear, file, uploadedBy = "maker", projectName) => {
   try {
+    const storagePath = projectName || await getStoragePath(projectId);
     const ext = file.name.split('.').pop();
     const fileName = `${uploadedBy}_proof_${Date.now()}.${ext}`;
-    const fileRef = ref(storage, `projects/${projectId}/sanityProofs/${monthYear}/${fileName}`);
+    const fileRef = ref(storage, `projects/${storagePath}/sanityProofs/${monthYear}/${fileName}`);
     await uploadBytes(fileRef, file, { contentType: file.type });
     const downloadURL = await getDownloadURL(fileRef);
     return { success: true, downloadURL, fileName };
