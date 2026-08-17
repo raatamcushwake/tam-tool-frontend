@@ -4,8 +4,10 @@ import { ProjectProvider, useProject } from "./context/ProjectContext";
 import Login from "./pages/Login";
 import LandingPage from "./pages/LandingPage";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
 import PendingApproval from "./pages/PendingApproval";
-import ProjectSelector from "./pages/ProjectSelector";
+import RejectedAccess from "./pages/RejectedAccess";
+
 import Dashboard from "./pages/Dashboard";
 import MISSanityCheck from "./pages/MISSanityCheck";
 import MISAnalysis from "./pages/MISAnalysis";
@@ -35,13 +37,11 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const ActiveRoute = ({ children }) => {
-  const { currentUser, isPending, isAdmin, userProfile } = useAuth();
-  const { selectedProject } = useProject();
+  const { currentUser, isPending, isRejected, isAdmin, profileLoading } = useAuth();
   if (!currentUser) return <Navigate to="/login" />;
+  if (profileLoading) return null;
+  if (!isAdmin && isRejected) return <Navigate to="/rejected" />;
   if (!isAdmin && isPending) return <Navigate to="/pending" />;
-  if (!isAdmin && !selectedProject && userProfile?.projectRoles?.length > 0) {
-    return <Navigate to="/select-project" />;
-  }
   return children;
 };
 
@@ -53,10 +53,12 @@ const AdminRoute = ({ children }) => {
 };
 
 const PublicRoute = ({ children }) => {
-  const { currentUser, isPending, isAdmin, userProfile } = useAuth();
+  const { currentUser, isPending, isRejected, isAdmin, profileLoading } = useAuth();
+  if (currentUser && profileLoading) return null;
   if (currentUser) {
-    if (!isAdmin && isPending) return <Navigate to="/pending" />;
-    if (!isAdmin && userProfile?.projectRoles?.length > 0) return <Navigate to="/select-project" />;
+    if (isAdmin) return <Navigate to="/admin" />;
+    if (isRejected) return <Navigate to="/rejected" />;
+    if (isPending) return <Navigate to="/pending" />;
     return <Navigate to="/home" />;
   }
   return children;
@@ -73,10 +75,15 @@ function AppRoutes() {
   <PublicRoute><Login /></PublicRoute>
 } />
 <Route path="/home" element={
-  <ProtectedRoute><LandingPage /></ProtectedRoute>
+  <ActiveRoute><LandingPage /></ActiveRoute>
 } />
       <Route path="/register" element={
         <PublicRoute><Register /></PublicRoute>
+      } />
+
+       {/* ADD THIS 👇 */}
+      <Route path="/forgot-password" element={
+        <PublicRoute><ForgotPassword /></PublicRoute>
       } />
 
       {/* Pending */}
@@ -87,6 +94,8 @@ function AppRoutes() {
       <Route path="/select-project" element={
         <ProtectedRoute><ProjectSelector /></ProtectedRoute>
       } />
+
+      
 
       {/* Active users only */}
       <Route path="/dashboard" element={
@@ -147,6 +156,9 @@ function AppRoutes() {
       } />
       <Route path="/reference-upload" element={
         <ActiveRoute><ReferenceUpload /></ActiveRoute>
+      } />
+      <Route path="/change-password" element={
+        <ProtectedRoute><ChangePassword /></ProtectedRoute>
       } />
 
       {/* Fallback */}

@@ -8,6 +8,7 @@ import {
   ChevronLeft, ChevronRight, Users, Settings, Upload, Landmark, Map, FileCheck2, History,
   ArrowLeftCircle
 } from "lucide-react";
+import { getCycleState } from "../../services/cycleStateService";
 
 const navItems = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -43,43 +44,18 @@ const isManager = currentRole === "MANAGER";
 const isMaker = currentRole === "MAKER";
 const isReviewer = currentRole === "REVIEWER";
 
-  // Safe localStorage read
-  // Reactive localStorage read — re-checks whenever storage changes
-  const [sanityPassed, setSanityPassed] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("sanityPassed")) || false;
-    } catch {
-      return false;
-    }
-  });
-
-  const [misSubmitted, setMisSubmitted] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("misSubmitted")) || false;
-    } catch {
-      return false;
-    }
-  });
+  const [cycleStateData, setCycleStateData] = useState(null);
+  const sanityPassed = !!cycleStateData?.analysisUnlocked;
 
   useEffect(() => {
-    const handleStorageChange = () => {
-      try {
-        setSanityPassed(JSON.parse(localStorage.getItem("sanityPassed")) || false);
-        setMisSubmitted(JSON.parse(localStorage.getItem("misSubmitted")) || false);
-      } catch {
-        setSanityPassed(false);
-        setMisSubmitted(false);
-      }
-    };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
+    if (!selectedProject?.projectId || !isMaker) return;
+    getCycleState(selectedProject.projectId).then(setCycleStateData);
+  }, [selectedProject, isMaker]);
 
   const handleLogout = async () => {
-  localStorage.removeItem("sanityPassed");
-  await logout();
-  navigate("/");
-};
+    await logout();
+    navigate("/");
+  };
 
   return (
     <div
