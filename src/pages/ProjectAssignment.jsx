@@ -12,12 +12,30 @@ const ROLE_COLORS = {
   MANAGER: "bg-green-100 text-green-700",
 };
 
+const AVAILABLE_MODULES = [
+  { key: "mis-sanity", label: "MIS Sanity Check" },
+  { key: "mis-analysis", label: "MIS Analysis" },
+  { key: "cost-analysis", label: "Cost Analysis" },
+  { key: "cs-tracker", label: "CS Tracker" },
+  { key: "approvals", label: "Approval Tracker" },
+  { key: "project-progress", label: "Project Progress" },
+  { key: "escrow-analysis", label: "Escrow Analysis" },
+  { key: "collection-mapping", label: "Collection Mapping" },
+];
+
 export default function ProjectAssignment() {
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newProjectName, setNewProjectName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
+  const [selectedModules, setSelectedModules] = useState([]);
+
+  const toggleModule = (key) => {
+    setSelectedModules((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
+  };
 
   // Assignment form state
   const [selectedProject, setSelectedProject] = useState("");
@@ -51,8 +69,10 @@ export default function ProjectAssignment() {
     try {
       await axios.post(`${import.meta.env.VITE_API_URL}/api/projects`, {
         name: newProjectName.trim(),
+        enabledModules: selectedModules,
       });
       setNewProjectName("");
+      setSelectedModules([]);
       await fetchData();
     } catch (err) {
       console.error("Error creating project:", err);
@@ -95,6 +115,36 @@ export default function ProjectAssignment() {
     } catch (err) {
       console.error("Error removing role:", err);
     }
+  };
+
+  const [editingModulesFor, setEditingModulesFor] = useState(null); // projectId currently being edited
+  const [editModulesSelection, setEditModulesSelection] = useState([]);
+  const [savingModules, setSavingModules] = useState(false);
+
+  const openEditModules = (project) => {
+    setEditingModulesFor(project.id);
+    setEditModulesSelection(project.enabledModules || []);
+  };
+
+  const toggleEditModule = (key) => {
+    setEditModulesSelection((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
+  };
+
+  const saveEditModules = async (projectId) => {
+    setSavingModules(true);
+    try {
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/api/projects/${projectId}/modules`,
+        { enabledModules: editModulesSelection }
+      );
+      setEditingModulesFor(null);
+      await fetchData();
+    } catch (err) {
+      console.error("Error updating modules:", err);
+    }
+    setSavingModules(false);
   };
 
   const exportProjectsToExcel = () => {
@@ -178,6 +228,29 @@ export default function ProjectAssignment() {
                   <Plus size={16} />
                   {creatingProject ? "Creating..." : "Create"}
                 </button>
+              </div>
+
+              {/* Module Access */}
+              <div className="mt-4">
+                <label className="block text-gray-700 text-xs font-semibold mb-2">
+                  Enabled Modules for this Project
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {AVAILABLE_MODULES.map((m) => (
+                    <label
+                      key={m.key}
+                      className="flex items-center gap-2 text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer hover:border-blue-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedModules.includes(m.key)}
+                        onChange={() => toggleModule(m.key)}
+                        className="accent-blue-600"
+                      />
+                      {m.label}
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -304,12 +377,56 @@ export default function ProjectAssignment() {
                   );
                   return (
                     <div key={project.id} className="px-6 py-4">
-                      <div className="flex items-center gap-2 mb-3">
-                        <FolderKanban size={15} className="text-blue-500" />
-                        <p className="text-gray-800 font-semibold text-sm">
-                          {project.name}
-                        </p>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <FolderKanban size={15} className="text-blue-500" />
+                          <p className="text-gray-800 font-semibold text-sm">
+                            {project.name}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => openEditModules(project)}
+                          className="text-blue-600 hover:text-blue-700 text-xs font-medium"
+                        >
+                          Edit Modules
+                        </button>
                       </div>
+
+                      {editingModulesFor === project.id && (
+                        <div className="mb-4 ml-5 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            {AVAILABLE_MODULES.map((m) => (
+                              <label
+                                key={m.key}
+                                className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={editModulesSelection.includes(m.key)}
+                                  onChange={() => toggleEditModule(m.key)}
+                                  className="accent-blue-600"
+                                />
+                                {m.label}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => saveEditModules(project.id)}
+                              disabled={savingModules}
+                              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+                            >
+                              {savingModules ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              onClick={() => setEditingModulesFor(null)}
+                              className="text-gray-500 hover:text-gray-700 text-xs font-medium px-3 py-1.5"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       {assignedUsers.length === 0 ? (
                         <p className="text-gray-400 text-xs ml-5">
                           No users assigned yet
