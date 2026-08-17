@@ -27,6 +27,8 @@ export default function ProjectSelector() {
       projectId: pr.projectId,
       projectName: pr.projectName,
       role: pr.role,
+      serviceLabel: pr.serviceLabel,
+      serviceKey: pr.serviceKey,
     });
     navigate("/home");
   };
@@ -88,6 +90,11 @@ export default function ProjectSelector() {
                         <p className="text-gray-400 text-xs mt-0.5">
                           {ROLE_DESCRIPTIONS[pr.role] || "Access this project"}
                         </p>
+                        {pr.serviceLabel && (
+                          <span className="inline-block mt-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100">
+                            {pr.serviceLabel}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${ROLE_COLORS[pr.role] || "bg-gray-100 text-gray-600 border-gray-200"}`}>
