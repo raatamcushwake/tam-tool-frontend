@@ -11,16 +11,16 @@ import {
 import { getCycleState } from "../../services/cycleStateService";
 
 const navItems = [
-  { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { path: "/mis-sanity", icon: FileSpreadsheet, label: "MIS Sanity Check" },
-  { path: "/mis-analysis", icon: BarChart3, label: "MIS Analysis" },
-  { path: "/cost-analysis", icon: IndianRupee, label: "Cost Analysis" },
-  { path: "/cs-tracker", icon: ShieldCheck, label: "CS Tracker" },
-  { path: "/approvals", icon: ClipboardList, label: "Approval Tracker" },
+  { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard", moduleKey: null }, // always visible
+  { path: "/mis-sanity", icon: FileSpreadsheet, label: "MIS Sanity Check", moduleKey: "mis-sanity" },
+  { path: "/mis-analysis", icon: BarChart3, label: "MIS Analysis", moduleKey: "mis-analysis" },
+  { path: "/cost-analysis", icon: IndianRupee, label: "Cost Analysis", moduleKey: "cost-analysis" },
+  { path: "/cs-tracker", icon: ShieldCheck, label: "CS Tracker", moduleKey: "cs-tracker" },
+  { path: "/approvals", icon: ClipboardList, label: "Approval Tracker", moduleKey: "approvals" },
   // { path: "/approval-form", icon: FileCheck2, label: "Approvals" },
-  { path: "/projects", icon: FolderKanban, label: "Project Progress" },
-  { path: "/escrow-analysis", icon: Landmark, label: "Escrow Analysis", roleAware: true },
-  { path: "/collection-mapping", icon: Map, label: "Collection Mapping" },
+  { path: "/projects", icon: FolderKanban, label: "Project Progress", moduleKey: "project-progress" },
+  { path: "/escrow-analysis", icon: Landmark, label: "Escrow Analysis", roleAware: true, moduleKey: "escrow-analysis" },
+  { path: "/collection-mapping", icon: Map, label: "Collection Mapping", moduleKey: "collection-mapping" },
 ];
 
 const managerItems = [
@@ -110,7 +110,13 @@ const isReviewer = currentRole === "REVIEWER";
         )}
 
         <ul className="space-y-1">
-          {!isAdmin && navItems.map((item) => {
+          {!isAdmin && navItems
+            .filter((item) => {
+              if (!item.moduleKey) return true; // Dashboard always shows
+              const enabledModules = selectedProject?.enabledModules || [];
+              return enabledModules.includes(item.moduleKey);
+            })
+            .map((item) => {
             const isMisAnalysis = item.path === "/mis-analysis";
             const isLocked = false;
 
