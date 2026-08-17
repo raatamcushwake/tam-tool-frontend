@@ -7,6 +7,8 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import PendingApproval from "./pages/PendingApproval";
 import RejectedAccess from "./pages/RejectedAccess";
+import ProjectSelector from "./pages/ProjectSelector";
+import ChangePassword from "./pages/ChangePassword";
 
 import Dashboard from "./pages/Dashboard";
 import MISSanityCheck from "./pages/MISSanityCheck";
@@ -89,6 +91,9 @@ function AppRoutes() {
       {/* Pending */}
       <Route path="/pending" element={
         <ProtectedRoute><PendingApproval /></ProtectedRoute>
+      } />
+      <Route path="/rejected" element={
+        <ProtectedRoute><RejectedAccess /></ProtectedRoute>
       } />
 
       <Route path="/select-project" element={
