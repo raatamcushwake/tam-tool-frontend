@@ -54,6 +54,9 @@ export default function LandingPage() {
       projectId: pr.projectId,
       projectName: pr.projectName,
       role: pr.role,
+      serviceLabel: pr.serviceLabel,
+      serviceKey: pr.serviceKey,
+      enabledModules: pr.enabledModules || [],
     });
     navigate("/dashboard");
   };
@@ -211,6 +214,11 @@ export default function LandingPage() {
                       <div>
                         <p className="text-gray-900 font-bold text-base">{pr.projectName || pr.projectId}</p>
                         <p className="text-gray-500 text-xs mt-0.5">{ROLE_DESCRIPTIONS[pr.role] || "Access this project"}</p>
+                        {pr.serviceLabel && (
+                          <span className="inline-block mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100">
+                            {pr.serviceLabel}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
