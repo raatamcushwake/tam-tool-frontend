@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Layout from "../components/common/Layout";
 import projectProgressService from "../services/projectProgressService";
 import { useProject } from "../context/ProjectContext";
@@ -145,6 +145,7 @@ export default function ProjectProgress() {
   const [savingMatrixValues, setSavingMatrixValues] = useState(false);
   const [matrixError, setMatrixError] = useState("");
   const [valuesSavedMsg, setValuesSavedMsg] = useState("");
+  const importFileInputRef = useRef(null);
 
   // ---------------- Load tower config ----------------
   useEffect(() => {
@@ -603,29 +604,68 @@ export default function ProjectProgress() {
   const TOTAL_ROW_STYLE = { fill: { fgColor: { rgb: "C6E0B4" } }, font: { bold: true } };
   const COMPLETION_ROW_STYLE = { fill: { fgColor: { rgb: "D9E1F2" } }, font: { bold: true } };
 
-  const handleExportExcel = () => {
+    const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
     const activities = flattenActivities(packages);
 
-    const inputAOA = [];
-    inputAOA.push(["No. of Towers", towers.length, "nos."]);
-    inputAOA.push(["Total Tower Area", Number(totalTowerArea) || 0, "sq m"]);
-    inputAOA.push(["Non Tower Area", Number(nonTowerArea) || 0, "sq m"]);
-    inputAOA.push([]);
-    inputAOA.push(["Tower configuration"]);
-    inputAOA.push(["Tower Name", ...towers.map((t) => t.name)]);
-    const towerNameRowIdx = inputAOA.length;
-    FIELD_ROWS.forEach((row) => {
-      inputAOA.push([row.label, ...towers.map((t) => Number(t[row.key]) || 0)]);
+    const statusAOA = [];
+    statusAOA.push(["Activity", ...towers.map((t) => t.name)]);
+    activities.forEach((a) => {
+      const row = [a.name];
+      towers.forEach((t) => {
+        const pct = matrixByTower[t.name]
+          ? Number(activityCompletionPercent(t.name, a.name)) / 100
+          : 0;
+        row.push({ t: "n", v: pct, z: "0.0%" });
+      });
+      statusAOA.push(row);
     });
-    const constructionAreaRowIdx = towerNameRowIdx + 1;
-    const inputWs = XLSX.utils.aoa_to_sheet(inputAOA);
-    autoFitColumns(inputWs, inputAOA);
-    applyBaseBorders(inputWs);
-    styleRow(inputWs, towerNameRowIdx - 1, HEADER_STYLE);
-    XLSX.utils.book_append_sheet(wb, inputWs, "Input Sheet");
+    const totalRow = ["Tower Total"];
+    towers.forEach((t) => {
+      const pct = matrixByTower[t.name] ? towerProgressPercent(t.name) / 100 : 0;
+      totalRow.push({ t: "n", v: pct, z: "0.00%" });
+    });
+    statusAOA.push(totalRow);
 
-    // ---------- Tower wise weightage input (with % format + Total row) ----------
+    const statusWs = XLSX.utils.aoa_to_sheet(statusAOA);
+    autoFitColumns(statusWs, statusAOA);
+    applyBaseBorders(statusWs);
+    styleRow(statusWs, 0, HEADER_STYLE);
+    styleRow(statusWs, statusAOA.length - 1, TOTAL_ROW_STYLE);
+    XLSX.utils.book_append_sheet(wb, statusWs, "Tower Level Status");
+
+    const summaryAOA = [];
+    summaryAOA.push(["Summary"]);
+    summaryAOA.push(["", "Weightage", "Tower Progress"]);
+    towers.forEach((t) => {
+      summaryAOA.push([
+        t.name,
+        { t: "n", v: towerWeightagePercent(t) / 100, z: "0%" },
+        { t: "n", v: matrixByTower[t.name] ? towerProgressPercent(t.name) / 100 : 0, z: "0.00%" },
+      ]);
+    });
+    summaryAOA.push([]);
+    summaryAOA.push([
+      "Project Progress",
+      "",
+      { t: "n", v: projectProgressPercent() / 100, z: "0.00%" },
+    ]);
+
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryAOA);
+    autoFitColumns(summaryWs, summaryAOA);
+    applyBaseBorders(summaryWs);
+    styleRow(summaryWs, 1, HEADER_STYLE);
+    styleRow(summaryWs, summaryAOA.length - 1, TOTAL_ROW_STYLE);
+    XLSX.utils.book_append_sheet(wb, summaryWs, "Project level Summary");
+
+    const today = new Date().toISOString().split("T")[0];
+    const projectLabel = (selectedProject?.projectName || "Project").replace(/\s+/g, "_");
+    XLSX.writeFile(wb, `Project_Progress_Summary_${projectLabel}_${today}.xlsx`);
+  };
+
+  const handleExportActivityMatrix = () => {
+    const wb = XLSX.utils.book_new();
+
     const weightageAOA = [];
     weightageAOA.push(["Package", "Activity", ...FLOOR_TYPES, "Total", "Activity Weightage basis cost", "Remarks"]);
     const activityRowIndex = {};
@@ -636,18 +676,16 @@ export default function ProjectProgress() {
           a.name,
           ...FLOOR_TYPES.map((f) => Number(a.values[f]) || 0),
           activityTotal(a.values),
-          { t: "n", v: Number(a.costWeightage) || 0, z: '0"%"' }, // raw integer + literal % suffix, no scaling
+          { t: "n", v: Number(a.costWeightage) || 0, z: '0"%"' },
           a.remarks || "",
         ]);
         activityRowIndex[a.name] = weightageAOA.length;
       });
     });
-    const lastActivityRow = weightageAOA.length; // before pushing the Total row
-    const weightageColLetter = colLetter(2 + FLOOR_TYPES.length + 1); // "Activity Weightage basis cost" column
+    const lastActivityRow = weightageAOA.length;
+    const weightageColLetter = colLetter(2 + FLOOR_TYPES.length + 1);
     weightageAOA.push([
-      "", "Total",
-      ...FLOOR_TYPES.map(() => ""),
-      "",
+      "", "Total", ...FLOOR_TYPES.map(() => ""), "",
       { t: "n", f: `SUM(${weightageColLetter}2:${weightageColLetter}${lastActivityRow})`, z: '0"%"' },
       "",
     ]);
@@ -659,8 +697,7 @@ export default function ProjectProgress() {
     styleRow(weightageWs, weightageAOA.length - 1, TOTAL_ROW_STYLE);
     XLSX.utils.book_append_sheet(wb, weightageWs, "Tower wise weightage input");
 
-    // ---------- One sheet per tower ----------
-    const towerMeta = [];
+    const activities = flattenActivities(packages);
     towers.forEach((tower) => {
       const matrix = matrixByTower[tower.name];
       if (!matrix) return;
@@ -709,16 +746,11 @@ export default function ProjectProgress() {
       const acRowIdx = aoa.length;
 
       aoa.push([]);
-
       const firstCol = colLetter(2);
       const lastCol = colLetter(2 + activities.length - 1);
       aoa.push([
         "Tower completion",
-        {
-          t: "n",
-          f: `SUMPRODUCT(${firstCol}${acRowIdx}:${lastCol}${acRowIdx},${firstCol}${awRowIdx}:${lastCol}${awRowIdx})`,
-          z: "0.00%",
-        },
+        { t: "n", f: `SUMPRODUCT(${firstCol}${acRowIdx}:${lastCol}${acRowIdx},${firstCol}${awRowIdx}:${lastCol}${awRowIdx})`, z: "0.00%" },
       ]);
       const towerCompletionRowIdx = aoa.length;
 
@@ -732,64 +764,82 @@ export default function ProjectProgress() {
       styleRow(ws, towerCompletionRowIdx - 1, TOTAL_ROW_STYLE);
       const safeName = tower.name.replace(/[\[\]*/\\?:]/g, "").slice(0, 31);
       XLSX.utils.book_append_sheet(wb, ws, safeName);
-
-      towerMeta.push({ name: tower.name, safeName, acRowIdx, totalCompletionRow: towerCompletionRowIdx });
     });
-
-    // ---------- Tower Level Status (transposed: activities as rows, towers as columns) ----------
-    const statusAOA = [];
-    statusAOA.push(["Activity", ...towerMeta.map((t) => t.name)]);
-    activities.forEach((a, i) => {
-      const col = colLetter(2 + i);
-      const row = [a.name];
-      towerMeta.forEach((t) => {
-        row.push({ t: "n", f: `'${t.safeName}'!${col}${t.acRowIdx}`, z: "0.0%" });
-      });
-      statusAOA.push(row);
-    });
-    const towerTotalRowIdx = statusAOA.length + 1; // 1-based row number of the "Tower Total" row
-    const totalRow = ["Tower Total"];
-    towerMeta.forEach((t) => {
-      totalRow.push({ t: "n", f: `'${t.safeName}'!B${t.totalCompletionRow}`, z: "0.00%" });
-    });
-    statusAOA.push(totalRow);
-    const statusWs = XLSX.utils.aoa_to_sheet(statusAOA);
-    autoFitColumns(statusWs, statusAOA);
-    applyBaseBorders(statusWs);
-    styleRow(statusWs, 0, HEADER_STYLE);
-    styleRow(statusWs, statusAOA.length - 1, TOTAL_ROW_STYLE);
-    XLSX.utils.book_append_sheet(wb, statusWs, "Tower Level Status");
-
-    // ---------- Project level Summary ----------
-    const summaryAOA = [];
-    summaryAOA.push(["Summary"]);
-    summaryAOA.push(["", "Weightage", "Tower Progress"]);
-    const summaryStartRow = summaryAOA.length + 1;
-    towerMeta.forEach((t, i) => {
-      const towerColInInput = colLetter(1 + i);
-      summaryAOA.push([
-        t.name,
-        { t: "n", f: `'Input Sheet'!${towerColInInput}${constructionAreaRowIdx}/'Input Sheet'!B2`, z: "0%" },
-        { t: "n", f: `'Tower Level Status'!${colLetter(1 + i)}${towerTotalRowIdx}`, z: "0.00%" },
-      ]);
-    });
-    const summaryEndRow = summaryAOA.length;
-    summaryAOA.push([]);
-    summaryAOA.push([
-      "Project Progress",
-      "",
-      { t: "n", f: `SUMPRODUCT(B${summaryStartRow}:B${summaryEndRow},C${summaryStartRow}:C${summaryEndRow})`, z: "0.00%" },
-    ]);
-    const summaryWs = XLSX.utils.aoa_to_sheet(summaryAOA);
-    autoFitColumns(summaryWs, summaryAOA);
-    applyBaseBorders(summaryWs);
-    styleRow(summaryWs, 1, HEADER_STYLE); // the "Weightage / Tower Progress" header row
-    styleRow(summaryWs, summaryAOA.length - 1, TOTAL_ROW_STYLE); // "Project Progress" row
-    XLSX.utils.book_append_sheet(wb, summaryWs, "Project level Summary");
 
     const today = new Date().toISOString().split("T")[0];
     const projectLabel = (selectedProject?.projectName || "Project").replace(/\s+/g, "_");
-    XLSX.writeFile(wb, `Project_Progress_${projectLabel}_${today}.xlsx`);
+    XLSX.writeFile(wb, `Project_Progress_Matrix_${projectLabel}_${today}.xlsx`);
+  };
+
+    const handleImportActivityMatrixClick = () => {
+    importFileInputRef.current?.click();
+  };
+
+  const handleImportActivityMatrixFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMatrixError("");
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array" });
+      const activities = flattenActivities(packages);
+
+      setMatrixByTower((prev) => {
+        const updated = { ...prev };
+
+        towers.forEach((tower) => {
+          const safeName = tower.name.replace(/[\[\]*/\\?:]/g, "").slice(0, 31);
+          const ws = wb.Sheets[safeName];
+          if (!ws) return; // no matching sheet for this tower in the uploaded file
+
+          const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+          if (!aoa.length) return;
+
+          const header = aoa[0]; // ["Floor", "Weightage", ...activity names]
+          const activityCols = [];
+          header.forEach((h, idx) => {
+            if (idx >= 2 && h) activityCols.push({ name: String(h).trim(), col: idx });
+          });
+
+          const newFloors = [];
+          const newValues = {};
+          activities.forEach((a) => {
+            newValues[a.name] = {};
+          });
+
+          for (let r = 1; r < aoa.length; r++) {
+            const row = aoa[r];
+            const floorLabel = row[0];
+            if (!floorLabel || floorLabel === "Total") break; // stop before summary rows
+            const weightage = Number(row[1]) || 0;
+            newFloors.push({ label: String(floorLabel), weightage });
+
+            activityCols.forEach(({ name, col }) => {
+              if (newValues[name]) {
+                newValues[name][String(floorLabel)] = Number(row[col]) || 0;
+              }
+            });
+          }
+
+          if (newFloors.length) {
+            updated[tower.name] = {
+              ...updated[tower.name],
+              floors: newFloors,
+              values: newValues,
+            };
+          }
+        });
+
+        return updated;
+      });
+
+      setValuesSavedMsg("Imported from Excel. Review below, then click Save to apply.");
+      setTimeout(() => setValuesSavedMsg(""), 4000);
+    } catch (err) {
+      setMatrixError("Failed to read the uploaded Excel file. Please check the file format.");
+    } finally {
+      e.target.value = "";
+    }
   };
 
   // ---------------- Render guards ----------------
@@ -1304,6 +1354,29 @@ export default function ProjectProgress() {
                   </div>
 
                   <div className="mt-6 flex items-center justify-end gap-3">
+                    <input
+                      ref={importFileInputRef}
+                      type="file"
+                      accept=".xlsx"
+                      onChange={handleImportActivityMatrixFile}
+                      className="hidden"
+                    />
+                    {structureLocked && (
+                      <button
+                        onClick={handleImportActivityMatrixClick}
+                        className="border border-emerald-600 text-emerald-600 hover:bg-emerald-50 font-semibold text-sm px-6 py-2.5 rounded-xl"
+                      >
+                        Upload Activity Matrix (Excel)
+                      </button>
+                    )}
+                    {structureLocked && (
+                      <button
+                        onClick={handleExportActivityMatrix}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm px-6 py-2.5 rounded-xl"
+                      >
+                        Download Activity Matrix (Excel)
+                      </button>
+                    )}
                     {isManager && structureLocked && (
                       <button
                         onClick={() => handleUnlockMatrix(tower.name)}
