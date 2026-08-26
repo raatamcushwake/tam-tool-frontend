@@ -7,4 +7,5 @@ export const ROUTES = {
   CS_TRACKER: "/cs-tracker",
   APPROVAL_TRACKER: "/approvals",
   PROJECT_PROGRESS: "/projects",
+  TDD_SERVICE: "/tdd-service",
 };
