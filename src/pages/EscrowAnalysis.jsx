@@ -354,6 +354,10 @@ const [outflowInput, setOutflowInput] = useState("");
     return (
       <Layout title="Escrow Analysis">
         <div id="live-cycle-anchor" className="max-w-full mx-auto px-8">
+          <button onClick={() => navigate("/services/continuous-monitoring")}
+            className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+            ← Back
+          </button>
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
             <p className="text-xs font-bold text-gray-500 mb-4">Approval Status</p>
             <div className="flex items-center">
@@ -521,6 +525,10 @@ const [outflowInput, setOutflowInput] = useState("");
     return (
       <Layout title="Escrow Analysis">
         <div className="max-w-full mx-auto px-8">
+          <button onClick={() => navigate("/services/continuous-monitoring")}
+            className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+            ← Back
+          </button>
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
             <p className="text-xs font-bold text-gray-500 mb-4">Approval Status</p>
             <div className="flex items-center">
@@ -841,6 +849,10 @@ const handleSave = async () => {
     <Layout title="Escrow Analysis">
 
       <div className="max-w-full mx-auto px-8">
+        <button onClick={() => navigate("/services/continuous-monitoring")}
+          className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+          ← Back
+        </button>
 
         {/* Step 1 - Excel Upload */}
         <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-6">
