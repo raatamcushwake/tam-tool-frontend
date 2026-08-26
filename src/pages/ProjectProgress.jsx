@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import Layout from "../components/common/Layout";
 import projectProgressService from "../services/projectProgressService";
 import { useProject } from "../context/ProjectContext";
@@ -70,19 +71,24 @@ const DEFAULT_PACKAGES = [
     name: "RCC & Civil Works",
     activities: [
       "RCC", "Blockwork", "Internal Plaster", "Waterproofing", "Ext Plaster",
-      "Flooring- main", "Gypsum (except staircase)", "Door Shutters",
-      "Kitchen Platform", "Internal Paint", "External Painting",
     ],
   },
   {
     name: "Finishing",
     activities: [
-      "Flooring-lift lobby & staircase", "lift Installation",
-      "Plumbing Downtakes and looping", "AC Installation",
-      "Fire fighting & FF", "Electrical Wiring", "Electrical Fittings",
+      "Flooring- main", "Gypsum (except staircase)", "Door Shutters",
+      "Kitchen Platform", "Internal Paint", "External Painting",
+      "Flooring-lift lobby & staircase",
     ],
   },
-  { name: "MEP", activities: ["CP Sanitary Fittings"] },
+  {
+    name: "MEP",
+    activities: [
+      "lift Installation", "Plumbing Downtakes and looping",
+      "AC Installation", "Fire fighting & FF",
+      "Electrical Wiring", "Electrical Fittings", "CP Sanitary Fittings",
+    ],
+  },
   { name: "Façade", activities: ["Aluminium Window Installation"] },
 ];
 
@@ -102,6 +108,21 @@ const buildDefaultPackages = () =>
 const activityTotal = (values) =>
   FLOOR_TYPES.reduce((sum, f) => sum + (Number(values[f]) || 0), 0);
 
+// Maps a Tower Configuration row to the Weightage table's floor-type columns.
+// Footing and Terrace have no equivalent in Tower Configuration, so they show "-".
+const towerConfigValueForFloorType = (tower, floorType) => {
+  const map = {
+    Basements: tower.basements,
+    Ground: tower.ground,
+    Stilt: tower.stilt,
+    Podiums: tower.podiums,
+    "Service floor": tower.serviceFloor,
+    "Upper floors": tower.upperFloors,
+  };
+  const val = map[floorType];
+  return val === undefined || val === "" ? "-" : val;
+};
+
 // ---------- Activity matrix helpers ----------
 // Floor rows are built manually by the Manager (add / rename / remove), starting from one seed row.
 const defaultFloorRows = () => [{ label: "Footing", weightage: 1 }];
@@ -117,6 +138,7 @@ const groupedActivityColumns = (packages) =>
     .filter((p) => p.activities.length > 0);
 
 export default function ProjectProgress() {
+  const navigate = useNavigate();
   const { selectedProject } = useProject();
   const isManager = selectedProject?.role === "MANAGER";
   const isMaker = selectedProject?.role === "MAKER";
@@ -136,6 +158,7 @@ export default function ProjectProgress() {
   const [weightageLoaded, setWeightageLoaded] = useState(false);
   const [savingWeightage, setSavingWeightage] = useState(false);
   const [weightageError, setWeightageError] = useState("");
+  const [activeWeightageTowerTab, setActiveWeightageTowerTab] = useState(0);
 
   // ---- Activity matrix state ----
   const [activeTowerTab, setActiveTowerTab] = useState(0);
@@ -356,6 +379,14 @@ export default function ProjectProgress() {
     await projectProgressService.unlockWeightageConfig(selectedProject.projectId);
     setWeightageStatus("draft");
   };
+  // TEMPORARY: resets packages/activities to the DEFAULT_PACKAGES grouping defined in code.
+  // Remove this handler + its button once the saved data has been cleaned up.
+  const handleResetToDefaults = () => {
+    if (!window.confirm("This will replace all current packages/activities with the default grouping. Continue?")) {
+      return;
+    }
+    setPackages(buildDefaultPackages());
+  };
 
   // ---------------- Activity matrix handlers ----------------
 
@@ -460,8 +491,17 @@ export default function ProjectProgress() {
     return 0;
   };
 
+  // Pulled from the Weightage Input step's Total column for that activity
+  const getActivityWeightageTotal = (activityName) => {
+    for (const p of packages) {
+      const act = p.activities.find((a) => a.name === activityName);
+      if (act) return activityTotal(act.values);
+    }
+    return 0;
+  };
+
   const activityCompletionNumeric = (towerName, activityName) => {
-    const denom = totalFloorsForActivity(towerName);
+    const denom = getActivityWeightageTotal(activityName);
     if (!denom) return 0;
     return (totalEntered(towerName, activityName) / denom) * 100;
   };
@@ -469,9 +509,9 @@ export default function ProjectProgress() {
   const activityCompletionPercent = (towerName, activityName) =>
     activityCompletionNumeric(towerName, activityName).toFixed(1);
 
-  // Tower's share of the whole project, from Tower Configuration's Construction Area
+  // Tower's share of the whole project = its Construction Area ÷ sum of ALL towers' Construction Area
   const towerWeightagePercent = (tower) => {
-    const total = Number(totalTowerArea) || 0;
+    const total = towers.reduce((sum, t) => sum + (Number(t.constructionArea) || 0), 0);
     if (!total) return 0;
     return ((Number(tower.constructionArea) || 0) / total) * 100;
   };
@@ -722,9 +762,11 @@ export default function ProjectProgress() {
       aoa.push(totalRow);
       const totalRowIdx = aoa.length;
 
-      const tfaRow = ["Total floors for activity", { t: "n", f: `SUM(B${floorStartRow}:B${floorEndRow})` }];
-      activities.forEach(() => {
-        tfaRow.push({ t: "n", f: `SUM($B$${floorStartRow}:$B$${floorEndRow})` });
+      const totalColLetter = colLetter(2 + FLOOR_TYPES.length);
+      const tfaRow = ["Total floors for activity", ""];
+      activities.forEach((a) => {
+        const wRow = activityRowIndex[a.name];
+        tfaRow.push({ t: "n", f: `'Tower wise weightage input'!${totalColLetter}${wRow}` });
       });
       aoa.push(tfaRow);
       const tfaRowIdx = aoa.length;
@@ -906,6 +948,10 @@ export default function ProjectProgress() {
 
   return (
     <Layout title="Project Progress">
+      <button onClick={() => navigate("/services/continuous-monitoring")}
+        className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+        ← Back
+      </button>
       <div className="space-y-6">
 
         {/* ================= Tower Configuration ================= */}
@@ -914,10 +960,13 @@ export default function ProjectProgress() {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-black text-gray-700">Tower Configuration</h2>
             {isManager && towerStatus === "locked" && (
-              <button onClick={handleUnlock} className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                Edit configuration
-              </button>
-            )}
+  <button
+    onClick={handleUnlock}
+    className="border border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold text-sm px-4 py-2 rounded-xl"
+  >
+    Edit configuration
+  </button>
+)}
             {towerStatus === "locked" && (
               <span className="text-xs font-bold uppercase tracking-wide text-green-600 bg-green-50 px-3 py-1 rounded-full">
                 Locked
@@ -1024,14 +1073,17 @@ export default function ProjectProgress() {
         </div>
         )}
 
-        {/* ================= Weightage Configuration ================= */}
+                {/* ================= Weightage Configuration ================= */}
         {isManager && towerStatus === "locked" && weightageLoaded && (
           <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-black text-gray-700">Tower Wise Weightage Input</h2>
               <div className="flex items-center gap-3">
                 {isManager && weightageStatus === "locked" && (
-                  <button onClick={handleUnlockWeightage} className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                  <button
+                    onClick={handleUnlockWeightage}
+                    className="border border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold text-sm px-4 py-2 rounded-xl"
+                  >
                     Edit configuration
                   </button>
                 )}
@@ -1049,108 +1101,156 @@ export default function ProjectProgress() {
               </div>
             )}
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[130px]">Package</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[180px]">Activity</th>
-                    {FLOOR_TYPES.map((f) => (
-                      <th key={f} className="text-left py-2 px-2 font-semibold text-gray-500 min-w-[80px]">{f}</th>
-                    ))}
-                    <th className="text-left py-2 px-2 font-semibold text-gray-500">Total</th>
-                    <th className="text-left py-2 px-2 font-semibold text-gray-500 min-w-[110px]">Cost Weightage %</th>
-                    <th className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[160px]">Remarks</th>
-                    {!weightageReadOnly && <th className="py-2 px-2"></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {packages.map((pkg, pIndex) => (
-                    <React.Fragment key={pIndex}>
-                      {pkg.activities.map((activity, aIndex) => (
-                        <tr key={`${pIndex}-${aIndex}`} className="border-t border-gray-100">
-                          {aIndex === 0 ? (
-                            <td className="py-2 px-3 align-top font-bold text-gray-700" rowSpan={pkg.activities.length}>
-                              <div className="flex items-start gap-1">
-                                <input
-                                  disabled={weightageReadOnly}
-                                  value={pkg.name}
-                                  onChange={(e) => updatePackageName(pIndex, e.target.value)}
-                                  className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold disabled:bg-transparent disabled:border-transparent"
-                                />
-                                {!weightageReadOnly && packages.length > 1 && (
-                                  <button onClick={() => removePackage(pIndex)} className="text-gray-300 hover:text-red-500 text-xs mt-1" title="Remove package">
-                                    ✕
-                                  </button>
-                                )}
-                              </div>
-                              {!weightageReadOnly && (
-                                <button onClick={() => addActivity(pIndex)} className="text-[10px] font-semibold text-blue-600 hover:text-blue-700 mt-2">
-                                  + Add activity
-                                </button>
-                              )}
-                            </td>
-                          ) : null}
-                          <td className="py-2 px-3">
-                            <input
-                              disabled={weightageReadOnly}
-                              value={activity.name}
-                              onChange={(e) => updateActivityName(pIndex, aIndex, e.target.value)}
-                              className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
-                            />
-                          </td>
-                          {FLOOR_TYPES.map((f) => (
-                            <td key={f} className="py-2 px-2">
-                              <input
-                                type="number"
-                                disabled={weightageReadOnly}
-                                value={activity.values[f]}
-                                onChange={(e) => updateActivityValue(pIndex, aIndex, f, e.target.value)}
-                                className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
-                              />
-                            </td>
-                          ))}
-                          <td className="py-2 px-2 font-semibold text-gray-700">{activityTotal(activity.values)}</td>
-                          <td className="py-2 px-2">
-                            <input
-                              type="number"
-                              disabled={weightageReadOnly}
-                              value={activity.costWeightage}
-                              onChange={(e) => updateActivityField(pIndex, aIndex, "costWeightage", e.target.value)}
-                              className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
-                            />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input
-                              disabled={weightageReadOnly}
-                              value={activity.remarks}
-                              onChange={(e) => updateActivityField(pIndex, aIndex, "remarks", e.target.value)}
-                              className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
-                            />
-                          </td>
-                          {!weightageReadOnly && (
-                            <td className="py-2 px-2">
-                              {pkg.activities.length > 1 && (
-                                <button onClick={() => removeActivity(pIndex, aIndex)} className="text-gray-300 hover:text-red-500 text-xs" title="Remove activity">
-                                  ✕
-                                </button>
-                              )}
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
+            {/* Tower tabs */}
+            <div className="flex gap-2 mb-6 border-b border-gray-200">
+              {towers.map((tower, i) => (
+                <button
+                  key={tower.name}
+                  onClick={() => setActiveWeightageTowerTab(i)}
+                  className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${
+                    activeWeightageTowerTab === i
+                      ? "border-blue-600 text-blue-600"
+                      : "border-transparent text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  {tower.name}
+                </button>
+              ))}
             </div>
 
+            {(() => {
+              const tower = towers[activeWeightageTowerTab];
+              if (!tower) return null;
+              return (
+                <div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[160px]">Package</th>
+                        <th className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[180px]">Activity</th>
+                        {FLOOR_TYPES.map((f) => (
+                          <th key={f} className="text-left py-2 px-2 font-semibold text-gray-500 min-w-[80px]">{f}</th>
+                        ))}
+                        <th className="text-left py-2 px-2 font-semibold text-gray-500">Total</th>
+                        <th className="text-left py-2 px-2 font-semibold text-gray-500 min-w-[110px]">Cost Weightage %</th>
+                        <th className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[160px]">Remarks</th>
+                        {!weightageReadOnly && <th className="py-2 px-2"></th>}
+                      </tr>
+                      <tr className="bg-amber-50 border-t border-amber-100">
+                        <td className="py-2 px-3 font-bold text-amber-800" colSpan={2}>Tower Configuration</td>
+                        {FLOOR_TYPES.map((f) => (
+                          <td key={f} className="py-2 px-2 font-semibold text-amber-800">
+                            {towerConfigValueForFloorType(tower, f)}
+                          </td>
+                        ))}
+                        <td className="py-2 px-2"></td>
+                        <td className="py-2 px-2"></td>
+                        <td className="py-2 px-3"></td>
+                        {!weightageReadOnly && <td className="py-2 px-2"></td>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {packages.map((pkg, pIndex) => (
+                        <React.Fragment key={pIndex}>
+                          {pkg.activities.map((activity, aIndex) => (
+                            <tr key={`${pIndex}-${aIndex}`} className="border-t border-gray-100">
+                              {aIndex === 0 ? (
+                              <td className="py-2 px-3 align-top font-bold text-gray-700 bg-orange-50 border-r border-orange-100" rowSpan={pkg.activities.length}>
+                                  <div className="flex items-start gap-1">
+                                    <input
+                                      disabled={weightageReadOnly}
+                                      value={pkg.name}
+                                      onChange={(e) => updatePackageName(pIndex, e.target.value)}
+                                      className="w-full min-w-0 border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold disabled:bg-transparent disabled:border-transparent whitespace-nowrap"
+                                    />
+                                    {!weightageReadOnly && packages.length > 1 && (
+                                      <button onClick={() => removePackage(pIndex)} className="text-gray-300 hover:text-red-500 text-xs mt-1" title="Remove package">
+                                        ✕
+                                      </button>
+                                    )}
+                                  </div>
+                                  {!weightageReadOnly && (
+                                    <button onClick={() => addActivity(pIndex)} className="text-[10px] font-semibold text-blue-600 hover:text-blue-700 mt-2">
+                                      + Add activity
+                                    </button>
+                                  )}
+                                </td>
+                              ) : null}
+                              <td className="py-2 px-3">
+                                <input
+                                  disabled={weightageReadOnly}
+                                  value={activity.name}
+                                  onChange={(e) => updateActivityName(pIndex, aIndex, e.target.value)}
+                                  className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
+                                />
+                              </td>
+                              {FLOOR_TYPES.map((f) => (
+                                <td key={f} className="py-2 px-2">
+                                  <input
+                                    type="number"
+                                    disabled={weightageReadOnly}
+                                    value={activity.values[f]}
+                                    onChange={(e) => updateActivityValue(pIndex, aIndex, f, e.target.value)}
+                                    className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
+                                  />
+                                </td>
+                              ))}
+                              <td className="py-2 px-2 font-semibold text-gray-700">{activityTotal(activity.values)}</td>
+                              <td className="py-2 px-2">
+                                <input
+                                  type="number"
+                                  disabled={weightageReadOnly}
+                                  value={activity.costWeightage}
+                                  onChange={(e) => updateActivityField(pIndex, aIndex, "costWeightage", e.target.value)}
+                                  className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
+                                />
+                              </td>
+                              <td className="py-2 px-3">
+                                <input
+                                  disabled={weightageReadOnly}
+                                  value={activity.remarks}
+                                  onChange={(e) => updateActivityField(pIndex, aIndex, "remarks", e.target.value)}
+                                  className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
+                                />
+                              </td>
+                              {!weightageReadOnly && (
+                                <td className="py-2 px-2">
+                                  {pkg.activities.length > 1 && (
+                                    <button onClick={() => removeActivity(pIndex, aIndex)} className="text-gray-300 hover:text-red-500 text-xs" title="Remove activity">
+                                      ✕
+                                    </button>
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                </div>
+              );
+            })()}
+
             <div className="mt-4 flex items-center justify-between">
-              {!weightageReadOnly && (
-                <button onClick={addPackage} className="text-xs font-semibold text-blue-600 hover:text-blue-700">
-                  + Add package
-                </button>
-              )}
+              <div className="flex items-center gap-4">
+                {!weightageReadOnly && (
+                  <button onClick={addPackage} className="text-xs font-semibold text-blue-600 hover:text-blue-700">
+                    + Add package
+                  </button>
+                )}
+                {!weightageReadOnly && (
+                  <button
+                    onClick={handleResetToDefaults}
+                    className="text-xs font-semibold text-red-600 hover:text-red-700"
+                    title="Replaces all packages/activities with the default grouping from code"
+                  >
+                    ⟲ Reset to Defaults
+                  </button>
+                )}
+              </div>
               <div className={`text-xs font-bold ${totalCostWeightage === 100 ? "text-green-600" : "text-amber-600"}`}>
                 Total Cost Weightage: {totalCostWeightage}% {totalCostWeightage !== 100 && "(should total 100%)"}
               </div>
@@ -1232,22 +1332,32 @@ export default function ProjectProgress() {
                         <tr className="bg-gray-50">
                           <th rowSpan={2} className="text-left py-2 px-3 font-semibold text-gray-500 min-w-[90px] align-bottom">Floor</th>
                           <th rowSpan={2} className="text-left py-2 px-2 font-semibold text-gray-500 min-w-[90px] align-bottom">Weightage</th>
-                          {groupedColumns.map((pkg) => (
+                          {groupedColumns.map((pkg, pkgIdx) => (
                             <th
                               key={pkg.name}
                               colSpan={pkg.activities.length}
-                              className="text-center py-1.5 px-2 font-bold text-gray-600 border-b border-gray-200 bg-gray-100"
+                              className={`text-center py-1.5 px-2 font-bold text-gray-600 border-b border-gray-200 bg-gray-100 ${
+                                pkgIdx < groupedColumns.length - 1 ? "border-r-2 border-r-gray-400" : ""
+                              }`}
                             >
                               {pkg.name}
                             </th>
                           ))}
                         </tr>
                         <tr className="bg-gray-50">
-                          {activities.map((a) => (
-                            <th key={a.name} className="text-left py-2 px-2 font-semibold text-gray-500 min-w-[100px]">
-                              {a.name}
-                            </th>
-                          ))}
+                          {activities.map((a) => {
+                            const isLastInPackage = groupedColumns.some((pkg) => pkg.activities.slice(-1)[0] === a.name);
+                            return (
+                              <th
+                                key={a.name}
+                                className={`text-left py-2 px-2 font-semibold text-gray-500 min-w-[100px] ${
+                                  isLastInPackage ? "border-r-2 border-r-gray-300" : ""
+                                }`}
+                              >
+                                {a.name}
+                              </th>
+                            );
+                          })}
                         </tr>
                       </thead>
                       <tbody>
@@ -1282,25 +1392,33 @@ export default function ProjectProgress() {
                                 className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
                               />
                             </td>
-                            {activities.map((a) => (
-                              <td key={a.name} className="py-2 px-2 text-center">
-                                {!structureLocked ? (
-                                  <span className="text-gray-300">—</span>
-                                ) : (
-                                  <input
-                                    type="number"
-                                    step="0.1"
-                                    min="0"
-                                    max={floor.weightage}
-                                    disabled={!canEditValues}
-                                    value={matrix.values?.[a.name]?.[floor.label] ?? 0}
-                                    onChange={(e) => updateActivityMatrixValue(tower.name, a.name, floor.label, e.target.value)}
-                                    title={`Max ${floor.weightage} (this floor's Weightage)`}
-                                    className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs text-center disabled:bg-gray-50"
-                                  />
-                                )}
-                              </td>
-                            ))}
+                            {activities.map((a, aColIdx) => {
+                              const isLastInPackage = a.name === groupedColumns.find((pkg) =>
+                                pkg.activities[pkg.activities.length - 1] === a.name
+                              )?.activities.slice(-1)[0];
+                              return (
+                                <td
+                                  key={a.name}
+                                  className={`py-2 px-2 text-center ${isLastInPackage ? "border-r-2 border-r-gray-300" : ""}`}
+                                >
+                                  {!structureLocked ? (
+                                    <span className="text-gray-300">—</span>
+                                  ) : (
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max={floor.weightage}
+                                      disabled={!canEditValues}
+                                      value={matrix.values?.[a.name]?.[floor.label] ?? 0}
+                                      onChange={(e) => updateActivityMatrixValue(tower.name, a.name, floor.label, e.target.value)}
+                                      title={`Max ${floor.weightage} (this floor's Weightage)`}
+                                      className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs text-center disabled:bg-gray-50"
+                                    />
+                                  )}
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
@@ -1317,7 +1435,7 @@ export default function ProjectProgress() {
                           <td className="py-2 px-3" colSpan={2}>Total floors for activity</td>
                           {activities.map((a) => (
                             <td key={a.name} className="py-2 px-2 text-gray-600 text-center">
-                              {totalFloorsForActivity(tower.name)}
+                              {getActivityWeightageTotal(a.name)}
                             </td>
                           ))}
                         </tr>
@@ -1377,14 +1495,14 @@ export default function ProjectProgress() {
                         Download Activity Matrix (Excel)
                       </button>
                     )}
-                    {isManager && structureLocked && (
-                      <button
-                        onClick={() => handleUnlockMatrix(tower.name)}
-                        className="text-sm font-semibold text-blue-600 hover:text-blue-700"
-                      >
-                        Edit structure
-                      </button>
-                    )}
+                   {isManager && structureLocked && (
+  <button
+    onClick={() => handleUnlockMatrix(tower.name)}
+    className="border border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold text-sm px-4 py-2 rounded-xl"
+  >
+    Edit structure
+  </button>
+)}
                     {isManager && !structureLocked && (
                       <button
                         onClick={() => handleSaveMatrixStructure(tower.name)}
