@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Layout from "../components/common/Layout";
 import { useProject } from "../context/ProjectContext";
 import { useAuth } from "../context/AuthContext";
@@ -106,6 +107,7 @@ const columnSequence = [
 ];
 
 export default function MISSanityCheck() {
+  const navigate = useNavigate();
   const { selectedProject } = useProject();
   const { currentUser } = useAuth();
   const isMaker = selectedProject?.role === "MAKER";
@@ -1064,6 +1066,10 @@ try {
 
   return (
     <Layout title="MIS Sanity Check">
+      <button onClick={() => navigate("/services/continuous-monitoring")}
+        className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+        <ArrowRight size={14} className="rotate-180" /> Back
+      </button>
       <div className="mb-6">
         <h3 className="text-gray-800 font-bold text-lg">MIS Sanity Check</h3>
         <p className="text-gray-400 text-sm mt-1">
