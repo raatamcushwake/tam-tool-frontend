@@ -3,6 +3,7 @@ import Layout from "../components/common/Layout";
 import { getAllProjectsWithSubmissions } from "../services/adminTrackerService";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
+import { useAuth } from "../context/AuthContext";
 
 const STATUS_COLOR = {
   PENDING_REVIEW:       "bg-yellow-100 text-yellow-700 border-yellow-200",
@@ -36,6 +37,7 @@ const fmt = (val) => {
 
 export default function AdminTracker() {
   console.log("🔥 TRACKER FILE VERSION 2 LOADED 🔥");
+  const { isExecutive, isBusinessHead, tamRegion } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterProject, setFilterProject] = useState("ALL");
@@ -48,8 +50,16 @@ export default function AdminTracker() {
     fetch(`${apiUrl}/api/projects`)
       .then(r => r.json())
       .then(async (data) => {
-        setProjects(data || []);
-        const allRows = await getAllProjectsWithSubmissions(data || []);
+        const allProjects = data || [];
+
+        // Business Head (and Admin, who already reaches this page) see everything.
+        // Executive only sees projects in their own region(s).
+        const scopedProjects = isExecutive && !isBusinessHead
+          ? allProjects.filter((p) => tamRegion.includes(p.region))
+          : allProjects;
+
+        setProjects(scopedProjects);
+        const allRows = await getAllProjectsWithSubmissions(scopedProjects);
         console.log("ALLROWS LENGTH:", allRows.length, allRows);
         setRows(allRows);
         setLoading(false);
@@ -58,7 +68,7 @@ export default function AdminTracker() {
         console.error("🚨 TRACKER FETCH ERROR:", err);
         setLoading(false);
       });
-  }, []);
+  }, [isExecutive, isBusinessHead, tamRegion]);
 
   const filtered = rows.filter(r =>
     (filterProject === "ALL" || r._projectName === filterProject) &&
