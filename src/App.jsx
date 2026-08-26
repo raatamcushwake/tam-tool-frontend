@@ -7,7 +7,6 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import PendingApproval from "./pages/PendingApproval";
 import RejectedAccess from "./pages/RejectedAccess";
-import ProjectSelector from "./pages/ProjectSelector";
 import ChangePassword from "./pages/ChangePassword";
 
 import Dashboard from "./pages/Dashboard";
@@ -28,6 +27,13 @@ import EscrowSummary from "./pages/EscrowSummary";
 import EscrowHistory from "./pages/EscrowHistory";
 import CollectionMapping from "./pages/CollectionMapping";
 import CollectionMappingResults from "./pages/CollectionMappingResults";
+import TDDService from "./pages/TDDService";
+import ServiceClients from "./pages/ServiceClients";
+import Services from "./pages/Services";
+import Overview from "./pages/Overview";
+import AssignmentTracker from "./pages/AssignmentTracker";
+import ManagerProjects from "./pages/ManagerProjects";
+import ManagerProjectDetail from "./pages/ManagerProjectDetail";
 // import Approval from "./pages/Approval";
 
 // ─── Route Guards ────────────────────────────────────────────
@@ -53,6 +59,21 @@ const AdminRoute = ({ children }) => {
   if (!isAdmin) return <Navigate to="/dashboard" />;
   return children;
 };
+
+const ManagerRoute = ({ children }) => {
+  const { currentUser, isManager, isAdmin } = useAuth();
+  if (!currentUser) return <Navigate to="/login" />;
+  if (!isManager && !isAdmin) return <Navigate to="/dashboard" />;
+  return children;
+};
+
+const ExecutiveRoute = ({ children }) => {
+  const { currentUser, isExecutive, isBusinessHead, isAdmin } = useAuth();
+  if (!currentUser) return <Navigate to="/login" />;
+  if (!isExecutive && !isBusinessHead && !isAdmin) return <Navigate to="/dashboard" />;
+  return children;
+};
+
 
 const PublicRoute = ({ children }) => {
   const { currentUser, isPending, isRejected, isAdmin, profileLoading } = useAuth();
@@ -95,10 +116,15 @@ function AppRoutes() {
       <Route path="/rejected" element={
         <ProtectedRoute><RejectedAccess /></ProtectedRoute>
       } />
-
-      <Route path="/select-project" element={
-        <ProtectedRoute><ProjectSelector /></ProtectedRoute>
-      } />
+      <Route path="/services" element={
+  <ActiveRoute><Services /></ActiveRoute>
+} />
+      <Route path="/services/:serviceKey" element={
+  <ActiveRoute><ServiceClients /></ActiveRoute>
+} />
+      <Route path="/overview" element={
+  <ActiveRoute><Overview /></ActiveRoute>
+} />
 
       
 
@@ -145,9 +171,20 @@ function AppRoutes() {
       <Route path="/collection-mapping/results" element={
   <ActiveRoute><CollectionMappingResults /></ActiveRoute>
 } />
+      <Route path="/tdd-service" element={
+  <ActiveRoute><TDDService /></ActiveRoute>
+} />
       {/* <Route path="/approval-form" element={
   <ActiveRoute><Approval /></ActiveRoute>
 } /> */}
+
+      {/* Manager only */}
+      <Route path="/manager/projects" element={
+        <ManagerRoute><ManagerProjects /></ManagerRoute>
+      } />
+            <Route path="/manager/projects/:projectId" element={
+        <ManagerRoute><ManagerProjectDetail /></ManagerRoute>
+      } />
 
       {/* Admin only */}
       <Route path="/admin" element={
@@ -165,6 +202,15 @@ function AppRoutes() {
       <Route path="/change-password" element={
         <ProtectedRoute><ChangePassword /></ProtectedRoute>
       } />
+      <Route path="/admin/assignment-tracker" element={
+  <AdminRoute><AssignmentTracker /></AdminRoute>
+} />
+      <Route path="/executive/tracker" element={
+  <ExecutiveRoute><AdminTracker /></ExecutiveRoute>
+} />
+      <Route path="/executive/projects/:projectId" element={
+  <ExecutiveRoute><ManagerProjectDetail /></ExecutiveRoute>
+} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" />} />
