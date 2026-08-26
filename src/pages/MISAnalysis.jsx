@@ -2349,6 +2349,11 @@ const planned = bpTargets.planned_collection;
     <Layout title="MIS Analysis">
       {showInventoryModal && inventorySummaryComputed.length > 0 && renderInventorySummaryModal()}
 
+      <button onClick={() => navigate("/services/continuous-monitoring")}
+        className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+        <ArrowRight size={14} className="rotate-180" /> Back
+      </button>
+
       <div className="mb-6">
         <h3 className="text-gray-800 font-bold text-lg">MIS Analysis</h3>
         <p className="text-gray-400 text-sm mt-1">
