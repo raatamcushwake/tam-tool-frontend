@@ -1,56 +1,33 @@
-import { useState, useEffect } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { useProject } from "../../context/ProjectContext";
 import {
-  LayoutDashboard, FileSpreadsheet, BarChart3, IndianRupee,
-  ShieldCheck, ClipboardList, FolderKanban, LogOut,
-  ChevronLeft, ChevronRight, Users, Settings, Upload, Landmark, Map, FileCheck2, History,
-  ArrowLeftCircle
+  Home, Grid3x3, Users, Settings, ClipboardList, LayoutDashboard,
+  LogOut, ChevronLeft, ChevronRight, FolderKanban
 } from "lucide-react";
-import { getCycleState } from "../../services/cycleStateService";
-
-const navItems = [
-  { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard", moduleKey: null }, // always visible
-  { path: "/mis-sanity", icon: FileSpreadsheet, label: "MIS Sanity Check", moduleKey: "mis-sanity" },
-  { path: "/mis-analysis", icon: BarChart3, label: "MIS Analysis", moduleKey: "mis-analysis" },
-  { path: "/cost-analysis", icon: IndianRupee, label: "Cost Analysis", moduleKey: "cost-analysis" },
-  { path: "/cs-tracker", icon: ShieldCheck, label: "CS Tracker", moduleKey: "cs-tracker" },
-  { path: "/approvals", icon: ClipboardList, label: "Approval Tracker", moduleKey: "approvals" },
-  // { path: "/approval-form", icon: FileCheck2, label: "Approvals" },
-  { path: "/projects", icon: FolderKanban, label: "Project Progress", moduleKey: "project-progress" },
-  { path: "/escrow-analysis", icon: Landmark, label: "Escrow Analysis", roleAware: true, moduleKey: "escrow-analysis" },
-  { path: "/collection-mapping", icon: Map, label: "Collection Mapping", moduleKey: "collection-mapping" },
-];
-
-const managerItems = [
-  { path: "/reference-upload", icon: Upload, label: "Reference Upload" },
-];
+import { NavLink } from "react-router-dom";
 
 const adminItems = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { path: "/admin", icon: Users, label: "User Management" },
   { path: "/admin/projects", icon: Settings, label: "Project Assignment" },
   { path: "/admin/tracker", icon: ClipboardList, label: "Activity Tracker" },
+  { path: "/admin/assignment-tracker", icon: ClipboardList, label: "Assignment Tracker" },
+];
+const managerItems = [
+  { path: "/manager/projects", icon: FolderKanban, label: "My Projects" },
+];
+const executiveItems = [
+  { path: "/executive/tracker", icon: ClipboardList, label: "Activity Tracker" },
 ];
 
 export default function Sidebar({ collapsed, setCollapsed }) {
- const { logout, userProfile, currentUser, isAdmin } = useAuth();
-const { selectedProject } = useProject();
-const navigate = useNavigate();
-  // Role checks
-const currentRole = selectedProject?.role;
-const isManager = currentRole === "MANAGER";
-const isMaker = currentRole === "MAKER";
-const isReviewer = currentRole === "REVIEWER";
+  const { logout, userProfile, currentUser, isAdmin, isManager, isExecutive, isBusinessHead } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [cycleStateData, setCycleStateData] = useState(null);
-  const sanityPassed = !!cycleStateData?.analysisUnlocked;
-
-  useEffect(() => {
-    if (!selectedProject?.projectId || !isMaker) return;
-    getCycleState(selectedProject.projectId).then(setCycleStateData);
-  }, [selectedProject, isMaker]);
+  const isHomeActive = location.pathname === "/home";
+  const isServicesActive = location.pathname.startsWith("/services");
+  const isOverviewActive = location.pathname === "/overview";
 
   const handleLogout = async () => {
     await logout();
@@ -89,19 +66,6 @@ const isReviewer = currentRole === "REVIEWER";
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
 
-        {/* Switch Project (back to project picker) */}
-        {!isAdmin && (
-          <button
-            onClick={() => navigate("/home")}
-            title="Switch Project"
-            className={`w-full flex items-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-600 text-sm font-medium mb-4
-              ${collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5"}`}
-          >
-            <ArrowLeftCircle size={18} />
-            {!collapsed && <span>Switch Project</span>}
-          </button>
-        )}
-
         {/* Main Menu */}
         {!collapsed && !isAdmin && (
           <p className="text-slate-500 text-xs font-semibold uppercase px-2 mb-3">
@@ -109,63 +73,53 @@ const isReviewer = currentRole === "REVIEWER";
           </p>
         )}
 
-        <ul className="space-y-1">
-          {!isAdmin && navItems
-            .filter((item) => {
-              if (!item.moduleKey) return true; // Dashboard always shows
-              const enabledModules = selectedProject?.enabledModules || [];
-              return enabledModules.includes(item.moduleKey);
-            })
-            .map((item) => {
-            const isMisAnalysis = item.path === "/mis-analysis";
-            const isLocked = false;
+        {!isAdmin && (
+          <ul className="space-y-1 mb-5">
+            <li>
+              <button
+                onClick={() => navigate("/home")}
+                title="Home"
+                className={`w-full flex items-center rounded-lg text-sm font-medium transition
+                  ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
+                  ${isHomeActive
+                    ? "bg-blue-600 text-white shadow-lg"
+                    : "text-slate-400 hover:text-white hover:bg-slate-600"}`}
+              >
+                <Home size={18} />
+                {!collapsed && <span>Home</span>}
+              </button>
+            </li>
+            <li>
+              <button
+                onClick={() => navigate("/overview")}
+                title="Overview"
+                className={`w-full flex items-center rounded-lg text-sm font-medium transition
+                  ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
+                  ${isOverviewActive
+                    ? "bg-blue-600 text-white shadow-lg"
+                    : "text-slate-400 hover:text-white hover:bg-slate-600"}`}
+              >
+                <LayoutDashboard size={18} />
+                {!collapsed && <span>Overview</span>}
+              </button>
+            </li>
+            <li>
+              <button
+                onClick={() => navigate("/services")}
+                title="Services"
+                className={`w-full flex items-center rounded-lg text-sm font-medium transition
+                  ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
+                  ${isServicesActive
+                    ? "bg-blue-600 text-white shadow-lg"
+                    : "text-slate-400 hover:text-white hover:bg-slate-600"}`}
+              >
+                <Grid3x3 size={18} />
+                {!collapsed && <span>Services</span>}
+              </button>
+            </li>
+          </ul>
+        )}
 
-            // Escrow Analysis is actually 3 different pages depending on role/stage:
-            // Manager sets it up (/escrow-analysis), Maker fills it in (/escrow-upload),
-            // Reviewer/anyone else just reviews the read-only summary (/escrow-summary).
-            // Escrow Analysis is actually 3 different pages depending on role/stage:
-            // Manager sets it up (/escrow-analysis), Maker fills it in (/escrow-upload).
-            // Reviewer now also starts at /escrow-analysis (read-only there) and can
-            // walk forward through Maker's data -> Summary -> Cumulative Summary.
-            let resolvedPath = item.path;
-            if (item.roleAware && isMaker) {
-              resolvedPath = "/escrow-upload";
-            }
-
-            return (
-              <li key={item.path}>
-                {isLocked ? (
-                  <div
-                    title="Complete Sanity Check first"
-                    className={`flex items-center rounded-lg text-sm font-medium cursor-not-allowed opacity-40
-                      ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
-                      text-slate-400`}
-                  >
-                    <item.icon size={18} />
-                    {!collapsed && <span>{item.label}</span>}
-                  </div>
-                ) : (
-                  <NavLink
-                    to={resolvedPath}
-                    title={item.label}
-                    className={({ isActive }) =>
-  `flex items-center rounded-lg text-sm font-medium transition
-  ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
-  ${isActive
-    ? "bg-blue-600 text-white shadow-lg"
-    : "text-slate-400 hover:text-white hover:bg-slate-600"}`
-}
-                  >
-                    <item.icon size={18} />
-                    {!collapsed && <span>{item.label}</span>}
-                  </NavLink>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-
-        {/* Manager Menu */}
         {isManager && !isAdmin && (
           <>
             {!collapsed && (
@@ -175,18 +129,52 @@ const isReviewer = currentRole === "REVIEWER";
             )}
             {collapsed && <div className="border-t border-slate-600 my-3" />}
 
-            <ul className="space-y-1">
+            <ul className="space-y-1 mb-5">
               {managerItems.map((item) => (
                 <li key={item.path}>
                   <NavLink
-                  to={item.path}
-                  end={item.path === "/admin"}
-                  title={item.label}
-                  className={({ isActive }) =>
+                    to={item.path}
+                    title={item.label}
+                    className={({ isActive }) =>
                       `flex items-center rounded-lg text-sm font-medium transition
                       ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
                       ${isActive
-                        ? "bg-emerald-600 text-white shadow-lg"
+                        ? "bg-green-600 text-white shadow-lg"
+                        : "text-slate-400 hover:text-white hover:bg-slate-600"}`
+                    }
+                  >
+                    <item.icon size={18} />
+                    {!collapsed && <span>{item.label}</span>}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {/* 👆👆👆 END OF NEW BLOCK 👆👆👆 */}
+
+
+                {(isExecutive || isBusinessHead) && !isAdmin && (
+          <>
+            {!collapsed && (
+              <p className="text-slate-500 text-xs font-semibold uppercase px-2 mt-6 mb-3">
+                {isBusinessHead ? "Business Head" : "Executive"}
+              </p>
+            )}
+            {collapsed && <div className="border-t border-slate-600 my-3" />}
+
+            <ul className="space-y-1 mb-5">
+              {executiveItems.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    title={item.label}
+                    className={({ isActive }) =>
+                      `flex items-center rounded-lg text-sm font-medium transition
+                      ${collapsed ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5"}
+                      ${isActive
+                        ? "bg-indigo-600 text-white shadow-lg"
                         : "text-slate-400 hover:text-white hover:bg-slate-600"}`
                     }
                   >
