@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import Layout from "../components/common/Layout";
 import { useAuth } from "../context/AuthContext";
 import { useProject } from "../context/ProjectContext";
@@ -34,6 +35,7 @@ const formatNum = (val) =>
   new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val || 0);
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { userProfile, currentUser } = useAuth();
   const { selectedProject, selectProject } = useProject();
 
@@ -362,6 +364,10 @@ const areaSoldChartData = useMemo(() => {
 
   return (
     <Layout title="Dashboard">
+      <button onClick={() => navigate("/services/continuous-monitoring")}
+        className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+        ← Back
+      </button>
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-6 mb-6 shadow-lg">
         <div className="flex items-center justify-between">
