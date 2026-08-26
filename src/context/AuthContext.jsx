@@ -77,6 +77,21 @@ const [profileLoading, setProfileLoading] = useState(true);
   // ─── Derived helpers ───────────────────────────────────────
   const isAdmin = userProfile?.isAdmin === true;
 
+  const isManager = Array.isArray(userProfile?.projectRoles)
+    ? userProfile.projectRoles.some((r) => r.role === "MANAGER")
+    : false;
+
+  const tamLevel = userProfile?.tamLevel || null;
+
+  const tamRegion = (() => {
+    const raw = userProfile?.tamRegion;
+    if (!raw) return [];
+    return Array.isArray(raw) ? raw : [raw];
+  })();
+
+  const isExecutive = tamLevel === "executive";
+  const isBusinessHead = tamLevel === "business_head";
+
   const isActive = userProfile?.status === "active" || 
                    userProfile?.status === "ACTIVE";
 
@@ -93,6 +108,11 @@ const value = {
   logout,
   fetchUserProfile,
   isAdmin,
+  isManager,
+  tamLevel,
+  tamRegion,
+  isExecutive,
+  isBusinessHead,
   isActive,
   isPending,
   isRejected,
