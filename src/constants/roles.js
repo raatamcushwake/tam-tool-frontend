@@ -18,3 +18,20 @@ export const ROLE_COLORS = {
   MANAGER: "bg-green-100 text-green-800",
   ADMIN: "bg-purple-100 text-purple-800",
 };
+
+// TAM level — separate from project ROLES above.
+// Sourced from userProfile.projectRoles.tamLevel (see AuthContext), not project-level roles.
+export const TAM_LEVELS = {
+  EXECUTIVE: "executive",
+  BUSINESS_HEAD: "business_head",
+};
+
+export const TAM_LEVEL_LABELS = {
+  executive: "Executive",
+  business_head: "Business Head",
+};
+
+export const TAM_LEVEL_COLORS = {
+  executive: "bg-indigo-100 text-indigo-800",
+  business_head: "bg-pink-100 text-pink-800",
+};
