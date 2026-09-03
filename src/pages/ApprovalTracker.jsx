@@ -401,7 +401,7 @@ export default function ApprovalTracker() {
   // ─── RENDER ───
   return (
     <Layout title="Approval Tracker">
-      <button onClick={() => navigate("/services/continuous-monitoring")}
+      <button onClick={() => navigate(-1)}
         className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
         ← Back
       </button>
