@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useProject } from "../context/ProjectContext";
 import { useAuth } from "../context/AuthContext";
 import Layout from "../components/common/Layout";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage } from "../services/firebase";
-import { Upload, Send, ThumbsUp, ThumbsDown, FileSpreadsheet } from "lucide-react";
+import { Upload, Send, ThumbsUp, ThumbsDown, FileSpreadsheet, ArrowLeft } from "lucide-react";
 import {
   CS_STATUS_CONFIG,
   submitCSTrackerForReview,
@@ -18,6 +19,7 @@ import {
 const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 export default function CSTracker() {
+  const navigate = useNavigate();
   const { selectedProject } = useProject();
   const { currentUser } = useAuth();
 
@@ -388,6 +390,10 @@ export default function CSTracker() {
 
   return (
     <Layout title="CS Tracker">
+      <button onClick={() => navigate(-1)}
+        className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+        <ArrowLeft size={14} /> Back
+      </button>
       <div className="mb-6">
         <h3 className="text-gray-800 font-bold text-lg">CS Tracker</h3>
         <p className="text-gray-400 text-sm mt-1">
