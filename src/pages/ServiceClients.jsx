@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Layout from "../components/common/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -17,7 +17,7 @@ export default function ServiceClients() {
   const { serviceKey } = useParams();
   const navigate = useNavigate();
   const { userProfile } = useAuth();
-  const { selectProject } = useProject();
+  const { selectProject, selectedProject } = useProject();
 
   const service = SERVICES_CATALOG.find((s) => s.key === serviceKey);
 
@@ -30,6 +30,17 @@ export default function ServiceClients() {
 
   const [selectedClient, setSelectedClient] = useState(null);
   const [openBundle, setOpenBundle] = useState(null);
+
+  // Re-hydrate selectedClient from context when navigating back (e.g. Back button
+  // from a tool page uses browser history, which remounts this component and
+  // would otherwise reset the dropdown to empty even though a project is
+  // already selected in context).
+  useEffect(() => {
+    if (selectedProject?.projectId && !selectedClient) {
+      const match = clients.find((c) => c.projectId === selectedProject.projectId);
+      if (match) setSelectedClient(match);
+    }
+  }, [selectedProject, clients]);
 
   const handleClientChange = (e) => {
   const projectId = e.target.value;
