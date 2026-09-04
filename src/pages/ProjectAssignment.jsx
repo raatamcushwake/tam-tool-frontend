@@ -24,6 +24,19 @@ const AVAILABLE_MODULES = [
   { key: "tdd-service", label: "TDD Service" },
 ];
 
+// TDD's own module set — these map to actual tabs inside the TDD Service page,
+// not the generic modules used by Continuous Monitoring / Periodic Monitoring / LIE.
+const TDD_MODULES = [
+  { key: "project-review", label: "Project Review" },
+  { key: "approvals", label: "Approvals" },
+  { key: "project-progress", label: "Project Progress" },
+  { key: "cost-review", label: "Cost Review" },
+  { key: "schedule", label: "Schedule" },
+];
+
+const modulesForService = (serviceKey) =>
+  serviceKey === "tdd" ? TDD_MODULES : AVAILABLE_MODULES;
+
 const SERVICES_LIST = [
   { key: "continuous-monitoring", label: "Continuous Monitoring" },
   { key: "periodic-monitoring", label: "Periodic Monitoring" },
@@ -58,7 +71,7 @@ function ServicesEditor({ selectedServices, moduleSelectionByService, onToggleSe
 
             {isOpen && (
               <div className="grid grid-cols-2 gap-2 px-3 pb-3 pt-1 bg-gray-50 border-t border-gray-100">
-                {AVAILABLE_MODULES.map((m) => (
+                {modulesForService(service.key).map((m) => (
                   <label
                     key={m.key}
                     className="flex items-center gap-2 text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer hover:border-blue-300 bg-white"
