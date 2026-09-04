@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Layout from "../components/common/Layout";
 import axios from "axios";
-import { ArrowLeft, Pencil, Save, X } from "lucide-react";
+import { ArrowLeft, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const FIELDS = [
@@ -40,10 +40,62 @@ const AVAILABLE_MODULES = [
   { key: "tdd-service", label: "TDD Service" },
 ];
 
+// Same reusable services+modules checklist used in ManagerProjects.jsx / ProjectAssignment.jsx
+function ServicesEditor({ selectedServices, moduleSelectionByService, onToggleService, onToggleModule }) {
+  return (
+    <div className="space-y-2">
+      {SERVICES_LIST.map((service) => {
+        const isOpen = selectedServices.includes(service.key);
+        const selectedMods = moduleSelectionByService[service.key] || [];
+        return (
+          <div key={service.key} className="border border-gray-200 rounded-xl overflow-hidden">
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={isOpen}
+                onChange={() => onToggleService(service.key)}
+                className="accent-blue-600"
+              />
+              {isOpen ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+              {service.label}
+              {isOpen && selectedMods.length > 0 && (
+                <span className="ml-auto text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                  {selectedMods.length} module{selectedMods.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </label>
+            {isOpen && (
+              <div className="grid grid-cols-2 gap-2 px-3 pb-3 pt-1 bg-gray-50 border-t border-gray-100">
+                {AVAILABLE_MODULES.map((m) => (
+                  <label
+                    key={m.key}
+                    className="flex items-center gap-2 text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer hover:border-blue-300 bg-white"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedMods.includes(m.key)}
+                      onChange={() => onToggleModule(service.key, m.key)}
+                      className="accent-blue-600"
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ManagerProjectDetail() {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { isManager, isAdmin, isExecutive, isBusinessHead, userProfile } = useAuth();
+  const {
+    isManager, isAdmin, isExecutive, isBusinessHead,
+    userProfile, currentUser, fetchUserProfile,
+  } = useAuth();
 
   const myRoleForThisProject = (userProfile?.projectRoles || []).find(
     (r) => r.projectId === projectId
@@ -63,6 +115,25 @@ export default function ManagerProjectDetail() {
   const [form, setForm] = useState({});
   const [name, setName] = useState("");
 
+  // Services & Modules editor state (only meaningful while editing)
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [moduleSelectionByService, setModuleSelectionByService] = useState({});
+
+  const toggleService = (key) => {
+    setSelectedServices((prev) =>
+      prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]
+    );
+  };
+  const toggleModule = (serviceKey, moduleKey) => {
+    setModuleSelectionByService((prev) => {
+      const current = prev[serviceKey] || [];
+      const next = current.includes(moduleKey)
+        ? current.filter((m) => m !== moduleKey)
+        : [...current, moduleKey];
+      return { ...prev, [serviceKey]: next };
+    });
+  };
+
   const fetchProject = async () => {
     try {
       const res = await axios.get(
@@ -71,6 +142,9 @@ export default function ManagerProjectDetail() {
       setProject(res.data);
       setForm(res.data.basicInfo || {});
       setName(res.data.name || "");
+      const existing = res.data.enabledServices || {};
+      setSelectedServices(Object.keys(existing));
+      setModuleSelectionByService(existing);
     } catch (err) {
       console.error("Error fetching project:", err);
     }
@@ -93,6 +167,50 @@ export default function ManagerProjectDetail() {
         `${import.meta.env.VITE_API_URL}/api/projects/${projectId}/basic-info`,
         { name, basicInfo: form }
       );
+
+      const enabledServices = {};
+      selectedServices.forEach((key) => {
+        enabledServices[key] = moduleSelectionByService[key] || [];
+      });
+      const previouslyEnabledKeys = Object.keys(project.enabledServices || {});
+      const newlyAddedKeys = selectedServices.filter(
+        (key) => !previouslyEnabledKeys.includes(key)
+      );
+
+      await axios.patch(
+        `${import.meta.env.VITE_API_URL}/api/projects/${projectId}/modules`,
+        { enabledServices }
+      );
+
+      // A service that's brand new to this project won't be in the manager's
+      // own projectRoles yet (that only gets set at project-creation time on
+      // the backend), so without this they could see the service listed here
+      // but wouldn't be able to open its tools. Give them access the same way
+      // Admin's "Assign Role" flow does.
+      if (isManager && currentUser) {
+        for (const key of newlyAddedKeys) {
+          const serviceMeta = SERVICES_LIST.find((s) => s.key === key);
+          try {
+            await axios.post(
+              `${import.meta.env.VITE_API_URL}/api/auth/user/${currentUser.uid}/assign-project`,
+              {
+                projectId,
+                projectName: name,
+                role: "MANAGER",
+                serviceKey: key,
+                serviceLabel: serviceMeta?.label || key,
+                enabledModules: enabledServices[key] || [],
+              }
+            );
+          } catch (err) {
+            console.error(`Error self-assigning new service "${key}":`, err);
+          }
+        }
+        if (newlyAddedKeys.length > 0) {
+          await fetchUserProfile(currentUser.uid);
+        }
+      }
+
       await fetchProject();
       setEditing(false);
     } catch (err) {
@@ -104,6 +222,9 @@ export default function ManagerProjectDetail() {
   const handleCancel = () => {
     setForm(project.basicInfo || {});
     setName(project.name || "");
+    const existing = project.enabledServices || {};
+    setSelectedServices(Object.keys(existing));
+    setModuleSelectionByService(existing);
     setEditing(false);
   };
 
@@ -220,7 +341,15 @@ export default function ManagerProjectDetail() {
 
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <h2 className="text-base font-bold text-gray-800 mb-3">Enabled Services</h2>
-          {serviceEntries.length === 0 ? (
+
+          {editing ? (
+            <ServicesEditor
+              selectedServices={selectedServices}
+              moduleSelectionByService={moduleSelectionByService}
+              onToggleService={toggleService}
+              onToggleModule={toggleModule}
+            />
+          ) : serviceEntries.length === 0 ? (
             <p className="text-gray-400 text-sm">No services enabled yet.</p>
           ) : (
             <div className="space-y-4">
