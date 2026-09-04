@@ -2,11 +2,11 @@ import { db } from "./firebase";
 import { collection, getDocs } from "firebase/firestore";
 
 const MODULES = [
-  { label: "MIS Sanity",       collection: "misSanitySubmissions",  periodField: "monthYear" },
-  { label: "MIS Analysis",     collection: "misSubmissions",        periodField: "monthYear" },
-  { label: "Cost Analysis",    collection: "costSubmissions",       periodField: "period" },
-  { label: "CS Tracker",       collection: "csTrackerSubmissions",  periodField: "period" },
-  { label: "Approval Tracker", collection: "approvalSubmissions",   periodField: "period" },
+  { label: "MIS Sanity",       collection: "misSanitySubmissions",  periodField: "monthYear", route: "/mis-sanity" },
+  { label: "MIS Analysis",     collection: "misSubmissions",        periodField: "monthYear", route: "/mis-analysis" },
+  { label: "Cost Analysis",    collection: "costSubmissions",       periodField: "period",    route: "/cost-analysis" },
+  { label: "CS Tracker",       collection: "csTrackerSubmissions",  periodField: "period",    route: "/cs-tracker" },
+  { label: "Approval Tracker", collection: "approvalSubmissions",   periodField: "period",    route: "/approval-tracker" },
 ];
 
 // Returns notifications relevant to the given role
@@ -42,6 +42,7 @@ export const getNotificationsForRole = async (projectId, role) => {
             message: `${submittedBy} submitted ${module.label} for your review`,
             time: getTime("submittedAt"),
             type: "action_needed",
+            link: `${module.route}?month=${encodeURIComponent(period)}`,
           });
         }
 
@@ -54,6 +55,7 @@ export const getNotificationsForRole = async (projectId, role) => {
             message: `${reviewedBy} approved ${module.label} — awaiting your final approval`,
             time: getTime("reviewedAt"),
             type: "action_needed",
+            link: `${module.route}?month=${encodeURIComponent(period)}`,
           });
         }
 
@@ -66,6 +68,7 @@ export const getNotificationsForRole = async (projectId, role) => {
             message: `${reviewedBy} rejected your ${module.label} submission`,
             time: getTime("reviewedAt"),
             type: "rejected",
+            link: `${module.route}?month=${encodeURIComponent(period)}`,
           });
         }
 
@@ -78,6 +81,7 @@ export const getNotificationsForRole = async (projectId, role) => {
             message: `${approvedBy} (Manager) rejected your ${module.label} submission`,
             time: getTime("approvedAt"),
             type: "rejected",
+            link: `${module.route}?month=${encodeURIComponent(period)}`,
           });
         }
 
@@ -90,6 +94,7 @@ export const getNotificationsForRole = async (projectId, role) => {
             message: `Your ${module.label} for ${period} has been approved & frozen`,
             time: getTime("approvedAt"),
             type: "approved",
+            link: `${module.route}?month=${encodeURIComponent(period)}`,
           });
         }
 
@@ -103,6 +108,7 @@ export const getNotificationsForRole = async (projectId, role) => {
               message: `${submittedBy} submitted ${module.label} (${period}) — awaiting reviewer`,
               time: getTime("submittedAt"),
               type: "action_needed",
+              link: `${module.route}?month=${encodeURIComponent(period)}`,
             });
           }
           if (data.status === "PENDING_MANAGER") {
@@ -113,6 +119,7 @@ export const getNotificationsForRole = async (projectId, role) => {
               message: `${reviewedBy} reviewed ${module.label} (${period}) — awaiting manager`,
               time: getTime("reviewedAt"),
               type: "action_needed",
+              link: `${module.route}?month=${encodeURIComponent(period)}`,
             });
           }
           if (data.status === "REJECTED_BY_REVIEWER") {
@@ -123,6 +130,7 @@ export const getNotificationsForRole = async (projectId, role) => {
               message: `${reviewedBy} rejected ${module.label} (${period}) by ${submittedBy}`,
               time: getTime("reviewedAt"),
               type: "rejected",
+              link: `${module.route}?month=${encodeURIComponent(period)}`,
             });
           }
           if (data.status === "REJECTED_BY_MANAGER") {
@@ -133,6 +141,7 @@ export const getNotificationsForRole = async (projectId, role) => {
               message: `Manager rejected ${module.label} (${period}) by ${submittedBy}`,
               time: getTime("approvedAt"),
               type: "rejected",
+              link: `${module.route}?month=${encodeURIComponent(period)}`,
             });
           }
           if (data.status === "APPROVED") {
@@ -143,6 +152,7 @@ export const getNotificationsForRole = async (projectId, role) => {
               message: `${module.label} (${period}) by ${submittedBy} fully approved`,
               time: getTime("approvedAt"),
               type: "approved",
+              link: `${module.route}?month=${encodeURIComponent(period)}`,
             });
           }
         }
