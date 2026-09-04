@@ -14,6 +14,8 @@ import {
   orderBy,
 } from "firebase/firestore";
 import Layout from "../components/common/Layout";
+import CostReview from "./CostReview";
+import ProjectProgress from "./ProjectProgress";
 import {
   ArrowLeft,
   ClipboardList,
@@ -211,7 +213,11 @@ const [activeModule, setActiveModule] = useState("Project Info"); // module tab 
       (e) => (e.projectId || e.projectName) === (selectedProject.projectId || selectedProject.projectName)
     );
 
-    const MODULES = ["Project Info", "Project Review", "Approvals", "Cost Review", "Schedule"];
+    const BASE_MODULES = ["Project Info", "Project Review", "Approvals", "Cost Review", "Schedule"];
+    const hasProjectProgress = selectedProject?.enabledModules?.includes("project-progress");
+    const MODULES = hasProjectProgress
+      ? [...BASE_MODULES.slice(0, 3), "Project Progress", ...BASE_MODULES.slice(3)]
+      : BASE_MODULES;
 
     return (
       <Layout title="TDD Service">
@@ -243,22 +249,39 @@ const [activeModule, setActiveModule] = useState("Project Info"); // module tab 
         </div>
 
         {activeModule === "Project Info" && (
-          <TDDForm
-            userProfile={userProfile}
-            lockProjectFields
-            initialProjectInfo={{ projectName: selectedProject.projectName, projectId: selectedProject.projectId }}
-            docId={existingEntry?.id || null}
-            onSaved={() => {
-              fetchTddEntries();
-            }}
-          />
-        )}
+  <TDDForm
+    userProfile={userProfile}
+    lockProjectFields
+    initialProjectInfo={{ projectName: selectedProject.projectName, projectId: selectedProject.projectId }}
+    docId={existingEntry?.id || null}
+    onSaved={() => {
+      fetchTddEntries();
+    }}
+  />
+)}
 
-        {activeModule !== "Project Info" && (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
-            <p className="text-gray-400 text-sm">{activeModule} — coming soon.</p>
-          </div>
-        )}
+{activeModule === "Project Progress" && (
+  <ProjectProgress
+    projectIdOverride={selectedProject.projectId}
+    roleOverride={selectedProject.role}
+    projectNameOverride={selectedProject.projectName}
+    embedded
+  />
+)}
+
+{activeModule === "Cost Review" && (
+  <CostReview
+    projectId={selectedProject.projectId || selectedProject.projectName}
+  />
+)}
+
+{activeModule !== "Project Info" &&
+  activeModule !== "Cost Review" &&
+  activeModule !== "Project Progress" && (
+  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
+    <p className="text-gray-400 text-sm">{activeModule} — coming soon.</p>
+  </div>
+)}
       </Layout>
     );
   }
