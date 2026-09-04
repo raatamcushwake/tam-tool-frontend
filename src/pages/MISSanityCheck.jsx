@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/common/Layout";
 import { useProject } from "../context/ProjectContext";
 import { useAuth } from "../context/AuthContext";
@@ -108,6 +108,7 @@ const columnSequence = [
 
 export default function MISSanityCheck() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { selectedProject } = useProject();
   const { currentUser } = useAuth();
   const isMaker = selectedProject?.role === "MAKER";
@@ -306,6 +307,19 @@ return () => clearInterval(interval);
       setSubmissionsLoading(false);
     });
   }, [selectedProject]);
+
+  // Deep-link from a notification: ?month=NOV-2025 auto-selects that submission
+  useEffect(() => {
+    const monthFromNotif = searchParams.get("month");
+    if (!monthFromNotif || allSubmissions.length === 0) return;
+    const match = allSubmissions.find(s => s.monthYear === monthFromNotif);
+    if (match) {
+      setSelectedSubmission(match);
+      setMonthYear(monthFromNotif);
+      setActiveTab('all');
+      setSearchTerm('');
+    }
+  }, [searchParams, allSubmissions]);
 
   const fmt = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val || 0);
 
@@ -557,6 +571,28 @@ try {
     }
     reviewerCommentRef.current = '';
     setReviewerProofFiles([]);
+    getAllSanitySubmissions(selectedProject.projectId).then(setAllSubmissions);
+    setActionLoading(false);
+  };
+
+  const handleManagerBypassApprove = async () => {
+    if (!selectedSubmission) return;
+    setActionLoading(true);
+    try {
+      await reviewerApproveSanity(
+        selectedProject.projectId, selectedSubmission.monthYear, currentUser.email,
+        "Approved by Manager — Reviewer unavailable", [], selectedSubmission.unitAnnotations || {}
+      );
+      await managerApproveSanity(
+        selectedProject.projectId, selectedSubmission.monthYear, currentUser.email,
+        managerCommentRef.current || "Approved directly (Reviewer bypassed)"
+      );
+      alert('✅ Approved directly by Manager (Reviewer bypassed).');
+    } catch (err) {
+      console.error(err);
+      alert('Error: ' + err.message);
+    }
+    managerCommentRef.current = '';
     getAllSanitySubmissions(selectedProject.projectId).then(setAllSubmissions);
     setActionLoading(false);
   };
@@ -1513,15 +1549,20 @@ try {
               {/* Approve / Reject actions — shown only for correct role + status */}
               {selectedSubmission.sanityCheckPassed === false &&
                ((isReviewer && (selectedSubmission.status === 'PENDING_REVIEW' || selectedSubmission.status === 'REJECTED_BY_MANAGER')) ||
-                (isManager && selectedSubmission.status === 'PENDING_MANAGER')) && (
+                (isManager && (selectedSubmission.status === 'PENDING_MANAGER' || selectedSubmission.status === 'PENDING_REVIEW'))) && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
                   <p className="text-sm font-black uppercase text-gray-400 mb-1">
                     {isReviewer ? '👁 Reviewer Action' : '✅ Manager Final Action'} — {selectedSubmission.monthYear}
                   </p>
-                  {isManager && (
+                  {isManager && selectedSubmission.status === 'PENDING_MANAGER' && (
   <p className="text-xs text-amber-600 font-semibold mb-3">
     ⚠ If you approve, MIS Analysis will be unlocked for the Maker.
     If you reject, it goes back to Reviewer with your comments.
+  </p>
+)}
+                  {isManager && selectedSubmission.status === 'PENDING_REVIEW' && (
+  <p className="text-xs text-amber-600 font-semibold mb-3">
+    ⚠ Reviewer hasn't reviewed this yet. Approving here will act on the Reviewer's behalf and finalize it in one step.
   </p>
 )}
                   {isReviewer && selectedSubmission.status === 'REJECTED_BY_MANAGER' && (
@@ -1585,7 +1626,11 @@ try {
 
                   <div className="flex gap-3">
                     <button
-                      onClick={() => isReviewer ? handleReviewerAction(true) : handleManagerAction(true)}
+                      onClick={() =>
+                        isReviewer ? handleReviewerAction(true)
+                        : selectedSubmission.status === 'PENDING_REVIEW' ? handleManagerBypassApprove()
+                        : handleManagerAction(true)
+                      }
                       disabled={actionLoading}
                       className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
                       <ThumbsUp size={15} />
@@ -1593,14 +1638,20 @@ try {
                         ? selectedSubmission.status === 'REJECTED_BY_MANAGER'
                           ? 'Re-send to Manager'
                           : 'Approve → Send to Manager'
-                        : 'Final Approve & Unlock MIS Analysis'}
+                        : selectedSubmission.status === 'PENDING_REVIEW'
+                          ? 'Approve Directly (Reviewer Unavailable)'
+                          : 'Final Approve & Unlock MIS Analysis'}
                     </button>
                     <button
-                      onClick={() => isReviewer ? handleReviewerAction(false) : handleManagerAction(false)}
+                      onClick={() =>
+                        isReviewer ? handleReviewerAction(false)
+                        : selectedSubmission.status === 'PENDING_REVIEW' ? handleReviewerAction(false)
+                        : handleManagerAction(false)
+                      }
                       disabled={actionLoading}
                       className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
                       <ThumbsDown size={15} />
-                      {isReviewer ? 'Reject → Back to Maker' : 'Reject → Back to Reviewer'}
+                      {isReviewer || selectedSubmission.status === 'PENDING_REVIEW' ? 'Reject → Back to Maker' : 'Reject → Back to Reviewer'}
                     </button>
                   </div>
                 </div>
