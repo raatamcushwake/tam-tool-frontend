@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 import Layout from "../components/common/Layout";
 import projectProgressService from "../services/projectProgressService";
 import { useProject } from "../context/ProjectContext";
@@ -137,9 +138,21 @@ const groupedActivityColumns = (packages) =>
     .map((p) => ({ name: p.name, activities: p.activities.map((a) => a.name) }))
     .filter((p) => p.activities.length > 0);
 
-export default function ProjectProgress() {
+function Shell({ embedded, children }) {
+  return embedded ? <>{children}</> : <Layout title="Project Progress">{children}</Layout>;
+}
+
+export default function ProjectProgress({
+  projectIdOverride,
+  roleOverride,
+  projectNameOverride,
+  embedded = false,
+}) {
   const navigate = useNavigate();
-  const { selectedProject } = useProject();
+  const { selectedProject: contextProject } = useProject();
+  const selectedProject = projectIdOverride
+    ? { projectId: projectIdOverride, role: roleOverride, projectName: projectNameOverride }
+    : contextProject;
   const isManager = selectedProject?.role === "MANAGER";
   const isMaker = selectedProject?.role === "MAKER";
 
@@ -148,13 +161,21 @@ export default function ProjectProgress() {
   const [nonTowerArea, setNonTowerArea] = useState("");
   const [towers, setTowers] = useState([emptyTower("Tower A"), emptyTower("Tower B")]);
   const [towerStatus, setTowerStatus] = useState("draft");
+
+  // ---- Non Tower config state ----
+  const [includeNonTower, setIncludeNonTower] = useState(false);
+  const [nonTowerConfig, setNonTowerConfig] = useState(emptyTower("Non Tower Area"));
+  const [nonTowerStatus, setNonTowerStatus] = useState("draft");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [nonTowerError, setNonTowerError] = useState("");
 
   // ---- Weightage config state ----
   const [packages, setPackages] = useState(buildDefaultPackages());
+  const [costReviewBudgets, setCostReviewBudgets] = useState({ budgets: {}, grandTotal: 0 });
   const [weightageStatus, setWeightageStatus] = useState("draft");
+  const weightageReadOnly = !isManager || weightageStatus === "locked";
   const [weightageLoaded, setWeightageLoaded] = useState(false);
   const [savingWeightage, setSavingWeightage] = useState(false);
   const [weightageError, setWeightageError] = useState("");
@@ -166,6 +187,8 @@ export default function ProjectProgress() {
   const [matrixLoaded, setMatrixLoaded] = useState(false);
   const [savingMatrixStructure, setSavingMatrixStructure] = useState(false);
   const [savingMatrixValues, setSavingMatrixValues] = useState(false);
+  const [exportingToStorage, setExportingToStorage] = useState(false);
+  const [exportMsg, setExportMsg] = useState("");
   const [matrixError, setMatrixError] = useState("");
   const [valuesSavedMsg, setValuesSavedMsg] = useState("");
   const importFileInputRef = useRef(null);
@@ -191,6 +214,64 @@ export default function ProjectProgress() {
       }
     })();
   }, [selectedProject?.projectId]);
+
+  // ---------------- Load Non Tower config ----------------
+  useEffect(() => {
+    if (!selectedProject?.projectId) return;
+    (async () => {
+      try {
+        const config = await projectProgressService.getNonTowerConfig(selectedProject.projectId);
+        if (config) {
+          setNonTowerConfig(config.data ?? emptyTower("Non Tower Area"));
+          setNonTowerStatus(config.status ?? "draft");
+          setIncludeNonTower(true);
+        }
+      } catch (err) {
+        if (err?.response?.status && err.response.status !== 404) {
+          setError("Could not load existing non tower configuration.");
+        }
+      }
+    })();
+  }, [selectedProject?.projectId]);
+
+  // ---------------- Load Cost Review budgets (to auto-calc Cost Weightage %) ----------------
+  useEffect(() => {
+    if (!selectedProject?.projectId) return;
+    const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+    axios
+      .get(`${API_URL}/api/tdd/cost-review/${selectedProject.projectId}/activity-budgets`)
+      .then((res) => setCostReviewBudgets(res.data || { budgets: {}, grandTotal: 0 }))
+      .catch(() => setCostReviewBudgets({ budgets: {}, grandTotal: 0 }));
+  }, [selectedProject?.projectId]);
+
+  // Cost Weightage % auto-calculated from Cost Review, for activities that
+  // have a matching Work Head/Description there. Returns null if unmapped
+  // (Manager still types those manually).
+  const getComputedCostWeightage = (activityName) => {
+    const budget = costReviewBudgets.budgets?.[activityName];
+    const grandTotal = costReviewBudgets.grandTotal;
+    if (budget === undefined || !grandTotal) return null;
+    return (budget / grandTotal) * 100;
+  };
+
+  // Keep packages' costWeightage in sync with Cost Review whenever budgets
+  // load/change, for any activity that has a mapping. Runs regardless of
+  // lock state so every screen (including read-only Tower Activity Matrix)
+  // always shows the correct linked %; it only affects local display state,
+  // not the saved Firestore config, so nothing is silently overwritten
+  // until the Manager actually re-saves.
+  useEffect(() => {
+    setPackages((prev) =>
+      prev.map((p) => ({
+        ...p,
+        activities: p.activities.map((a) => {
+          const computed = getComputedCostWeightage(a.name);
+          return computed === null ? a : { ...a, costWeightage: Math.round(computed * 10) / 10 };
+        }),
+      }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [costReviewBudgets]);
 
   // ---------------- Load weightage config (only once tower config is locked) ----------------
   useEffect(() => {
@@ -279,7 +360,20 @@ export default function ProjectProgress() {
     setSaving(true);
     setError("");
     try {
-      const payload = { totalTowerArea, nonTowerArea, towers };
+      const payload = {
+        totalTowerArea: totalTowerArea === "" ? 0 : totalTowerArea,
+        nonTowerArea: nonTowerArea === "" ? 0 : nonTowerArea,
+        towers: towers.map((t) => ({
+          ...t,
+          constructionArea: t.constructionArea === "" ? 0 : t.constructionArea,
+          basements: t.basements === "" ? 0 : t.basements,
+          ground: t.ground === "" ? 0 : t.ground,
+          stilt: t.stilt === "" ? 0 : t.stilt,
+          podiums: t.podiums === "" ? 0 : t.podiums,
+          serviceFloor: t.serviceFloor === "" ? 0 : t.serviceFloor,
+          upperFloors: t.upperFloors === "" ? 0 : t.upperFloors,
+        })),
+      };
       const result = await projectProgressService.saveTowerConfig(selectedProject.projectId, payload);
       setTowerStatus(result?.status ?? "locked");
     } catch (err) {
@@ -292,6 +386,39 @@ export default function ProjectProgress() {
   const handleUnlock = async () => {
     await projectProgressService.unlockTowerConfig(selectedProject.projectId);
     setTowerStatus("draft");
+  };
+
+  // ---------------- Non Tower config handlers ----------------
+  const updateNonTower = (field, value) => {
+    setNonTowerConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveNonTower = async () => {
+    setSaving(true);
+    setNonTowerError("");
+    try {
+      const payload = {
+        ...nonTowerConfig,
+        constructionArea: nonTowerConfig.constructionArea === "" ? 0 : nonTowerConfig.constructionArea,
+        basements: nonTowerConfig.basements === "" ? 0 : nonTowerConfig.basements,
+        ground: nonTowerConfig.ground === "" ? 0 : nonTowerConfig.ground,
+        stilt: nonTowerConfig.stilt === "" ? 0 : nonTowerConfig.stilt,
+        podiums: nonTowerConfig.podiums === "" ? 0 : nonTowerConfig.podiums,
+        serviceFloor: nonTowerConfig.serviceFloor === "" ? 0 : nonTowerConfig.serviceFloor,
+        upperFloors: nonTowerConfig.upperFloors === "" ? 0 : nonTowerConfig.upperFloors,
+      };
+      const result = await projectProgressService.saveNonTowerConfig(selectedProject.projectId, payload);
+      setNonTowerStatus(result?.status ?? "locked");
+    } catch (err) {
+      setNonTowerError("Failed to save non tower configuration. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUnlockNonTower = async () => {
+    await projectProgressService.unlockNonTowerConfig(selectedProject.projectId);
+    setNonTowerStatus("draft");
   };
 
   // ---------------- Weightage config handlers ----------------
@@ -509,9 +636,11 @@ export default function ProjectProgress() {
   const activityCompletionPercent = (towerName, activityName) =>
     activityCompletionNumeric(towerName, activityName).toFixed(1);
 
-  // Tower's share of the whole project = its Construction Area ÷ sum of ALL towers' Construction Area
+  // Tower's share of the whole project = its Construction Area ÷ sum of ALL entities' Construction Area
+  // (towers + Non Tower Area, when Non Tower Area is included and locked)
   const towerWeightagePercent = (tower) => {
-    const total = towers.reduce((sum, t) => sum + (Number(t.constructionArea) || 0), 0);
+    const entities = includeNonTower && nonTowerStatus === "locked" ? [...towers, nonTowerConfig] : towers;
+    const total = entities.reduce((sum, t) => sum + (Number(t.constructionArea) || 0), 0);
     if (!total) return 0;
     return ((Number(tower.constructionArea) || 0) / total) * 100;
   };
@@ -526,9 +655,23 @@ export default function ProjectProgress() {
     }, 0);
   };
 
-  // Sum of each tower's Progress weighted by its share of Total Tower Area
+  // Area-weighted total of an activity's Completion% across all towers:
+  // (Tower A completion% * Tower A construction area + Tower B completion% * Tower B construction area + ...) / Total construction area
+  const activityWeightedTotalPercent = (activityName) => {
+    const totalArea = towers.reduce((sum, t) => sum + (Number(t.constructionArea) || 0), 0);
+    if (!totalArea) return 0;
+    const weightedSum = towers.reduce((sum, t) => {
+      const completion = matrixByTower[t.name] ? activityCompletionNumeric(t.name, activityName) : 0;
+      const area = Number(t.constructionArea) || 0;
+      return sum + completion * area;
+    }, 0);
+    return weightedSum / totalArea;
+  };
+
+  // Sum of each entity's (tower + Non Tower Area) Progress weighted by its share of Total Area
   const projectProgressPercent = () => {
-    return towers.reduce((sum, tower) => {
+    const entities = includeNonTower && nonTowerStatus === "locked" ? [...towers, nonTowerConfig] : towers;
+    return entities.reduce((sum, tower) => {
       const tw = towerWeightagePercent(tower) / 100;
       const tp = towerProgressPercent(tower.name);
       return sum + tw * tp;
@@ -677,7 +820,8 @@ export default function ProjectProgress() {
     const summaryAOA = [];
     summaryAOA.push(["Summary"]);
     summaryAOA.push(["", "Weightage", "Tower Progress"]);
-    towers.forEach((t) => {
+    const summaryEntities = includeNonTower && nonTowerStatus === "locked" ? [...towers, nonTowerConfig] : towers;
+    summaryEntities.forEach((t) => {
       summaryAOA.push([
         t.name,
         { t: "n", v: towerWeightagePercent(t) / 100, z: "0%" },
@@ -701,6 +845,20 @@ export default function ProjectProgress() {
     const today = new Date().toISOString().split("T")[0];
     const projectLabel = (selectedProject?.projectName || "Project").replace(/\s+/g, "_");
     XLSX.writeFile(wb, `Project_Progress_Summary_${projectLabel}_${today}.xlsx`);
+  };
+
+  const handleSaveToStorage = async () => {
+    setExportingToStorage(true);
+    setExportMsg("");
+    try {
+      await projectProgressService.exportToStorage(selectedProject.projectId);
+      setExportMsg("Saved to Storage.");
+      setTimeout(() => setExportMsg(""), 3000);
+    } catch (err) {
+      setExportMsg("Failed to save to Storage. Please try again.");
+    } finally {
+      setExportingToStorage(false);
+    }
   };
 
   const handleExportActivityMatrix = () => {
@@ -887,15 +1045,15 @@ export default function ProjectProgress() {
   // ---------------- Render guards ----------------
   if (loading) {
     return (
-      <Layout title="Project Progress">
+      <Shell embedded={embedded}>
         <div className="text-center text-gray-400 p-16">Loading...</div>
-      </Layout>
+      </Shell>
     );
   }
 
   if (!isManager && towerStatus === "draft" && towers.every((t) => !t.constructionArea)) {
     return (
-      <Layout title="Project Progress">
+      <Shell embedded={embedded}>
         <div className="bg-white border border-gray-200 rounded-2xl p-16 text-center shadow-sm">
           <div className="text-5xl mb-4">⏳</div>
           <h2 className="text-xl font-black text-gray-700 mb-2">Awaiting Manager Setup</h2>
@@ -903,14 +1061,14 @@ export default function ProjectProgress() {
             The Manager hasn't configured the tower structure for this project yet.
           </p>
         </div>
-      </Layout>
+      </Shell>
     );
   }
 
   // Maker: Tower Configuration is locked, but Manager hasn't finished the Weightage Input step yet
   if (!isManager && towerStatus === "locked" && weightageLoaded && weightageStatus !== "locked") {
     return (
-      <Layout title="Project Progress">
+      <Shell embedded={embedded}>
         <div className="bg-white border border-gray-200 rounded-2xl p-16 text-center shadow-sm">
           <div className="text-5xl mb-4">⏳</div>
           <h2 className="text-xl font-black text-gray-700 mb-2">Awaiting Manager Setup</h2>
@@ -918,7 +1076,7 @@ export default function ProjectProgress() {
             The Manager is still finalizing the weightage configuration for this project.
           </p>
         </div>
-      </Layout>
+      </Shell>
     );
   }
 
@@ -931,7 +1089,7 @@ export default function ProjectProgress() {
     towers.every((t) => matrixByTower[t.name]?.status !== "locked")
   ) {
     return (
-      <Layout title="Project Progress">
+      <Shell embedded={embedded}>
         <div className="bg-white border border-gray-200 rounded-2xl p-16 text-center shadow-sm">
           <div className="text-5xl mb-4">⏳</div>
           <h2 className="text-xl font-black text-gray-700 mb-2">Awaiting Manager Setup</h2>
@@ -939,19 +1097,24 @@ export default function ProjectProgress() {
             The Manager hasn't finalized the activity matrix structure for any tower yet.
           </p>
         </div>
-      </Layout>
+      </Shell>
     );
   }
 
   const towerReadOnly = !isManager || towerStatus === "locked";
-  const weightageReadOnly = !isManager || weightageStatus === "locked";
+  const nonTowerReadOnly = !isManager || nonTowerStatus === "locked";
+  // Combined list used by Weightage Input / Activity Matrix / Tower Level Status
+  // so Non Tower Area flows through the exact same per-entity UI as towers.
+  const allEntities = includeNonTower && nonTowerStatus === "locked" ? [...towers, nonTowerConfig] : towers;
 
   return (
-    <Layout title="Project Progress">
-      <button onClick={() => navigate("/services/continuous-monitoring")}
-        className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
-        ← Back
-      </button>
+    <Shell embedded={embedded}>
+      {!embedded && (
+        <button onClick={() => navigate("/services/continuous-monitoring")}
+          className="mb-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold rounded-xl transition-all">
+          ← Back
+        </button>
+      )}
       <div className="space-y-6">
 
         {/* ================= Tower Configuration ================= */}
@@ -1006,6 +1169,22 @@ export default function ProjectProgress() {
               />
             </div>
           </div>
+
+          {isManager && (
+            <div className="mb-8 flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="includeNonTower"
+                checked={includeNonTower}
+                disabled={nonTowerStatus === "locked"}
+                onChange={(e) => setIncludeNonTower(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <label htmlFor="includeNonTower" className="text-sm font-semibold text-gray-600">
+                This project also has a Non Tower Area to track
+              </label>
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
@@ -1073,6 +1252,85 @@ export default function ProjectProgress() {
         </div>
         )}
 
+        {/* ================= Non Tower Configuration ================= */}
+        {isManager && includeNonTower && (
+        <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-black text-gray-700">Non Tower Configuration</h2>
+            {isManager && nonTowerStatus === "locked" && (
+              <button
+                onClick={handleUnlockNonTower}
+                className="border border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold text-sm px-4 py-2 rounded-xl"
+              >
+                Edit configuration
+              </button>
+            )}
+            {nonTowerStatus === "locked" && (
+              <span className="text-xs font-bold uppercase tracking-wide text-green-600 bg-green-50 px-3 py-1 rounded-full">
+                Locked
+              </span>
+            )}
+          </div>
+
+          {nonTowerError && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-2">
+              {nonTowerError}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr>
+                  <th className="text-left text-gray-500 font-semibold py-2 pr-4 w-40">Field</th>
+                  <th className="text-left py-2 px-3 min-w-[140px]">Non Tower Area</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-gray-100">
+                  <td className="py-2 pr-4 text-gray-600 font-medium">Construction Area</td>
+                  <td className="py-2 px-3">
+                    <input
+                      type="number"
+                      disabled={nonTowerReadOnly}
+                      value={nonTowerConfig.constructionArea}
+                      onChange={(e) => updateNonTower("constructionArea", e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-2 py-1 text-sm disabled:bg-gray-50"
+                    />
+                  </td>
+                </tr>
+                {FIELD_ROWS.filter((row) => row.key !== "constructionArea").map((row) => (
+                  <tr key={row.key} className="border-t border-gray-100">
+                    <td className="py-2 pr-4 text-gray-600 font-medium">{row.label}</td>
+                    <td className="py-2 px-3">
+                      <input
+                        type="number"
+                        disabled={nonTowerReadOnly}
+                        value={nonTowerConfig[row.key]}
+                        onChange={(e) => updateNonTower(row.key, e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1 text-sm disabled:bg-gray-50"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {isManager && nonTowerStatus !== "locked" && (
+            <div className="mt-8 flex justify-end">
+              <button
+                onClick={handleSaveNonTower}
+                disabled={saving}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-6 py-2.5 rounded-xl disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save & Lock Configuration"}
+              </button>
+            </div>
+          )}
+        </div>
+        )}
+
                 {/* ================= Weightage Configuration ================= */}
         {isManager && towerStatus === "locked" && weightageLoaded && (
           <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
@@ -1103,7 +1361,7 @@ export default function ProjectProgress() {
 
             {/* Tower tabs */}
             <div className="flex gap-2 mb-6 border-b border-gray-200">
-              {towers.map((tower, i) => (
+              {allEntities.map((tower, i) => (
                 <button
                   key={tower.name}
                   onClick={() => setActiveWeightageTowerTab(i)}
@@ -1119,7 +1377,7 @@ export default function ProjectProgress() {
             </div>
 
             {(() => {
-              const tower = towers[activeWeightageTowerTab];
+              const tower = allEntities[activeWeightageTowerTab];
               if (!tower) return null;
               return (
                 <div>
@@ -1198,13 +1456,23 @@ export default function ProjectProgress() {
                               ))}
                               <td className="py-2 px-2 font-semibold text-gray-700">{activityTotal(activity.values)}</td>
                               <td className="py-2 px-2">
-                                <input
-                                  type="number"
-                                  disabled={weightageReadOnly}
-                                  value={activity.costWeightage}
-                                  onChange={(e) => updateActivityField(pIndex, aIndex, "costWeightage", e.target.value)}
-                                  className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
-                                />
+                                {getComputedCostWeightage(activity.name) !== null ? (
+                                  <input
+                                    type="number"
+                                    disabled
+                                    value={activity.costWeightage}
+                                    title="Auto-calculated from Cost Review (Budget ÷ Grand Total)"
+                                    className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs bg-blue-50 text-blue-700 font-semibold"
+                                  />
+                                ) : (
+                                  <input
+                                    type="number"
+                                    disabled={weightageReadOnly}
+                                    value={activity.costWeightage}
+                                    onChange={(e) => updateActivityField(pIndex, aIndex, "costWeightage", e.target.value)}
+                                    className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs disabled:bg-gray-50"
+                                  />
+                                )}
                               </td>
                               <td className="py-2 px-3">
                                 <input
@@ -1293,7 +1561,7 @@ export default function ProjectProgress() {
 
             {/* Tower tabs */}
             <div className="flex gap-2 mb-6 border-b border-gray-200">
-              {towers.map((tower, i) => (
+              {allEntities.map((tower, i) => (
                 <button
                   key={tower.name}
                   onClick={() => setActiveTowerTab(i)}
@@ -1314,7 +1582,7 @@ export default function ProjectProgress() {
             </div>
 
             {(() => {
-              const tower = towers[activeTowerTab];
+              const tower = allEntities[activeTowerTab];
               const matrix = matrixByTower[tower?.name];
               if (!tower || !matrix) return null;
 
@@ -1550,7 +1818,7 @@ export default function ProjectProgress() {
                   </tr>
                 </thead>
                 <tbody>
-                  {towers.map((tower) => (
+                  {allEntities.map((tower) => (
                     <tr key={tower.name} className="border-t border-gray-100">
                       <td className="py-2 px-3 font-bold text-gray-700">{tower.name}</td>
                       {flattenActivities(packages).map((a) => (
@@ -1564,6 +1832,17 @@ export default function ProjectProgress() {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-300 bg-gray-50 font-bold">
+                    <td className="py-2 px-3 text-gray-800">Total</td>
+                    {flattenActivities(packages).map((a) => (
+                      <td key={a.name} className="py-2 px-2 text-gray-700">
+                        {activityWeightedTotalPercent(a.name).toFixed(1)}%
+                      </td>
+                    ))}
+                    <td className="py-2 px-3"></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -1587,7 +1866,7 @@ export default function ProjectProgress() {
                   </tr>
                 </thead>
                 <tbody>
-                  {towers.map((tower) => (
+                  {allEntities.map((tower) => (
                     <tr key={tower.name} className="border-t border-gray-100">
                       <td className="py-2 px-3 font-bold text-gray-700">{tower.name}</td>
                       <td className="py-2 px-3 text-gray-600">{towerWeightagePercent(tower).toFixed(0)}%</td>
@@ -1606,7 +1885,17 @@ export default function ProjectProgress() {
               </table>
             </div>
 
-            <div className="flex justify-end mt-6">
+            <div className="flex items-center justify-end gap-3 mt-6">
+              {exportMsg && <span className="text-xs text-gray-500">{exportMsg}</span>}
+              {isManager && (
+                <button
+                  onClick={handleSaveToStorage}
+                  disabled={exportingToStorage}
+                  className="border border-emerald-600 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 font-semibold text-sm px-5 py-2.5 rounded-xl"
+                >
+                  {exportingToStorage ? "Saving..." : "Save to Storage"}
+                </button>
+              )}
               <button
                 onClick={handleExportExcel}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl"
@@ -1618,6 +1907,6 @@ export default function ProjectProgress() {
         )}
 
       </div>
-    </Layout>
+    </Shell>
   );
 }
