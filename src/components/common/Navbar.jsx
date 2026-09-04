@@ -233,7 +233,13 @@ export default function Navbar({ title = "Dashboard" }) {
                     {visibleNotifications.map((n) => (
                       <div
                         key={n.id}
+                        onClick={() => {
+                          if (!n.link) return;
+                          setShowNotifications(false);
+                          navigate(n.link);
+                        }}
                         className={`px-5 py-4 flex gap-3 hover:bg-gray-50 transition group
+                          ${n.link ? "cursor-pointer" : ""}
                           ${n.type === "action_needed" ? "bg-amber-50/30" : ""}
                           ${n.type === "rejected" ? "bg-red-50/20" : ""}
                           ${n.type === "approved" ? "bg-green-50/20" : ""}
@@ -258,7 +264,7 @@ export default function Navbar({ title = "Dashboard" }) {
                           )}
                         </div>
                         <button
-                          onClick={() => dismissOne(n.id)}
+                          onClick={(e) => { e.stopPropagation(); dismissOne(n.id); }}
                           className="opacity-0 group-hover:opacity-100 transition text-gray-300 hover:text-gray-500 shrink-0"
                         >
                           <X size={13} />
