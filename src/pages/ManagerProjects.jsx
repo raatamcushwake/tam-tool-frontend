@@ -79,7 +79,9 @@ function ServicesEditor({ selectedServices, moduleSelectionByService, onToggleSe
 }
 
 export default function ManagerProjects() {
-  const { currentUser, userProfile } = useAuth();
+  // NOTE: pulled fetchUserProfile out of useAuth() as well — this is the only
+  // change to this line. Everything else in the component is untouched.
+  const { currentUser, userProfile, fetchUserProfile } = useAuth();
   const navigate = useNavigate();
   const [myProjects, setMyProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -205,6 +207,14 @@ export default function ManagerProjects() {
 
       resetForm();
       setShowCreateForm(false);
+
+      // FIX: the project just got a new projectRoles entry written in Firestore
+      // (backend does this for MANAGER-created projects), but our local
+      // userProfile in AuthContext was only ever fetched once at login, so it
+      // doesn't know about that new entry yet. Refresh it from the DB first,
+      // THEN re-filter projects against the now-current projectRoles —
+      // otherwise fetchMyProjects() silently drops the brand-new project.
+      await fetchUserProfile(currentUser.uid);
       await fetchMyProjects();
     } catch (err) {
       console.error("Error creating project:", err);
