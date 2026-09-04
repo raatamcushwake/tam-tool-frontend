@@ -8,7 +8,7 @@ import {
 import Layout from "../components/common/Layout";
 import { useProject } from "../context/ProjectContext";
 import { useAuth } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Upload, FileSpreadsheet, X, CheckCircle, ArrowRight, Search,
   MoveRight, ArrowDownRight, ArrowUpRight, ShieldX, TrendingUp,
@@ -83,6 +83,7 @@ export default function MISAnalysis() {
   const { selectedProject } = useProject();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isMaker = selectedProject?.role === "MAKER";
   const isReviewer = selectedProject?.role === "REVIEWER";
   const isManager = selectedProject?.role === "MANAGER";
@@ -234,6 +235,30 @@ useEffect(() => {
       setSubmissionsLoading(false);
     });
   }, [selectedProject]);
+
+  // Deep-link from a notification: ?month=NOV-2025 auto-selects that submission
+  useEffect(() => {
+    const monthFromNotif = searchParams.get("month");
+    if (!monthFromNotif || allSubmissions.length === 0) return;
+    const match = allSubmissions.find(s => s.monthYear === monthFromNotif);
+    if (match) {
+      setSelectedSubmission(match);
+      setExtractedData(match.extractedData || []);
+      setUnitStats(match.unitStats || { total: 0, sold: 0, unsold: 0 });
+      setMonthYear(monthFromNotif);
+      if (match.extractedData?.length > 0) {
+        const cols = {};
+        const skip = ['Status', 'DEMAND_INCREMENT_VAL', 'RECEIVED_INCREMENT_VAL', 'AGREEMENT_INCREMENT_VAL',
+          'prev_agreement', 'agreement_delta', 'prev_amount_received', 'amount_received_delta',
+          'prev_demand', 'demand_delta', 'prev_saleable', 'saleable_delta', 'prev_carpet', 'carpet_delta', 'REFERENCE_MSP',
+          'Amount Received excl. Tax'];
+        const allKeys = new Set();
+        match.extractedData.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+        allKeys.forEach(k => { if (!skip.includes(k)) cols[k] = true; });
+        setVisibleColumns(cols);
+      }
+    }
+  }, [searchParams, allSubmissions]);
 
   // Check current month submission status for Maker
   useEffect(() => {
@@ -870,6 +895,24 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
     reviewerCommentRef.current = '';
     getAllMISSubmissions(selectedProject.projectId).then(setAllSubmissions);
     setActionLoading(false);
+  };
+
+  const handleManagerBypassApprove = async () => {
+    if (!selectedSubmission) return;
+    setActionLoading(true);
+    try {
+      await reviewerApproveMIS(
+        selectedProject.projectId, selectedSubmission.monthYear, currentUser.email,
+        "Approved by Manager — Reviewer unavailable"
+      );
+    } catch (err) {
+      console.error(err);
+      alert('Error standing in for Reviewer: ' + err.message);
+      setActionLoading(false);
+      return;
+    }
+    setActionLoading(false);
+    await handleManagerAction(true); // runs the full freeze + cycle-reset flow, same as normal final approval
   };
 
   const handleManagerAction = async (approve) => {
@@ -2739,11 +2782,16 @@ const planned = bpTargets.planned_collection;
             <>
               {/* Approve/Reject for correct role and status */}
               {((isReviewer && (selectedSubmission.status === 'PENDING_REVIEW' || selectedSubmission.status === 'REJECTED_BY_MANAGER')) ||
-  (isManager && selectedSubmission.status === 'PENDING_MANAGER')) && (
+  (isManager && (selectedSubmission.status === 'PENDING_MANAGER' || selectedSubmission.status === 'PENDING_REVIEW'))) && (
                 <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
                   <p className="text-sm font-black uppercase text-gray-400 mb-3">
                     {isReviewer ? '👁 Reviewer Action' : '✅ Manager Final Action'} — {selectedSubmission.monthYear}
                   </p>
+                  {isManager && selectedSubmission.status === 'PENDING_REVIEW' && (
+  <p className="text-xs text-amber-600 font-semibold mb-3">
+    ⚠ Reviewer hasn't reviewed this yet. Approving here will act on the Reviewer's behalf and finalize it in one step.
+  </p>
+)}
                   {isReviewer && selectedSubmission.status === 'REJECTED_BY_MANAGER' && (
   <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl">
     <p className="text-xs font-bold text-red-600">❌ Manager rejected this submission.</p>
@@ -2762,7 +2810,11 @@ const planned = bpTargets.planned_collection;
                   />
                   <div className="flex gap-3">
                     <button
-                      onClick={() => isReviewer ? handleReviewerAction(true) : handleManagerAction(true)}
+                      onClick={() =>
+                        isReviewer ? handleReviewerAction(true)
+                        : selectedSubmission.status === 'PENDING_REVIEW' ? handleManagerBypassApprove()
+                        : handleManagerAction(true)
+                      }
                       disabled={actionLoading}
                       className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
                       <ThumbsUp size={15} />
@@ -2770,14 +2822,20 @@ const planned = bpTargets.planned_collection;
   ? selectedSubmission.status === 'REJECTED_BY_MANAGER'
     ? 'Re-send to Manager'
     : 'Approve → Send to Manager'
-  : 'Final Approve & Freeze Month'}
+  : selectedSubmission.status === 'PENDING_REVIEW'
+    ? 'Approve Directly (Reviewer Unavailable)'
+    : 'Final Approve & Freeze Month'}
                     </button>
                     <button
-                      onClick={() => isReviewer ? handleReviewerAction(false) : handleManagerAction(false)}
+                      onClick={() =>
+                        isReviewer ? handleReviewerAction(false)
+                        : selectedSubmission.status === 'PENDING_REVIEW' ? handleReviewerAction(false)
+                        : handleManagerAction(false)
+                      }
                       disabled={actionLoading}
                       className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
                       <ThumbsDown size={15} />
-                      {isReviewer ? 'Reject → Back to Maker' : 'Reject → Back to Reviewer'}
+                      {isReviewer || selectedSubmission.status === 'PENDING_REVIEW' ? 'Reject → Back to Maker' : 'Reject → Back to Reviewer'}
                     </button>
                   </div>
                 </div>
