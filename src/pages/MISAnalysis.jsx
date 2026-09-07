@@ -2861,6 +2861,48 @@ const planned = bpTargets.planned_collection;
                 </div>
               )}
 
+              {/* Source files — maker's uploaded MIS + reference sheets, downloadable by Reviewer/Manager */}
+{extractedData.length > 0 && (
+  <div className="mb-6 p-4 bg-white border border-gray-200 rounded-2xl shadow-sm">
+    <p className="text-xs font-black uppercase tracking-widest text-gray-400 mb-3">Source Files</p>
+    <div className="flex flex-wrap gap-3">
+      {selectedSubmission.currFileURL ? (
+        <a
+          href={selectedSubmission.currFileURL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-xl px-4 py-2.5 text-xs font-bold text-blue-700 transition">
+          <Download size={14} /> {selectedSubmission.monthYear} MIS (uploaded by Maker)
+        </a>
+      ) : (
+        <span className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-xs font-bold text-gray-400">
+          <FileText size={14} /> Maker's MIS file not found
+        </span>
+      )}
+
+      {inventoryData?.downloadURL ? (
+        <a
+          href={inventoryData.downloadURL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-xl px-4 py-2.5 text-xs font-bold text-emerald-700 transition">
+          <Download size={14} /> Total Inventory Sheet
+        </a>
+      ) : null}
+
+      {businessPlanData?.downloadURL ? (
+        <a
+          href={businessPlanData.downloadURL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-xl px-4 py-2.5 text-xs font-bold text-purple-700 transition">
+          <Download size={14} /> Business Plan Sheet
+        </a>
+      ) : null}
+    </div>
+  </div>
+)}
+
               {extractedData.length > 0 && renderAnalysis()}
             </>
           )}
