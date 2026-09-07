@@ -114,6 +114,9 @@ export default function MISSanityCheck() {
   const isMaker = selectedProject?.role === "MAKER";
   const isReviewer = selectedProject?.role === "REVIEWER";
   const isManager = selectedProject?.role === "MANAGER";
+  console.log("SELECTED PROJECT:", selectedProject);
+  const isPeriodic = selectedProject?.serviceKey === "periodic-monitoring";
+const monthsToAdvance = isPeriodic ? 3 : 1;
 
   const [files, setFiles] = useState({ prev: null, curr: null });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -178,8 +181,9 @@ export default function MISSanityCheck() {
         const monIdx = months.indexOf(parts[0]?.toUpperCase()?.substring(0, 3));
         const year = parseInt(parts[1]);
         if (monIdx !== -1 && !isNaN(year)) {
-          const nextMonIdx = (monIdx + 1) % 12;
-          const nextYear = monIdx === 11 ? year + 1 : year;
+          const totalIdx = monIdx + monthsToAdvance;
+          const nextMonIdx = ((totalIdx % 12) + 12) % 12;
+          const nextYear = year + Math.floor(totalIdx / 12);
           derivedMonthYear = `${months[nextMonIdx]}-${nextYear}`;
           setMonthYear(derivedMonthYear);
         }
@@ -217,8 +221,9 @@ const checkApproval = (my) => {
         const monIdx = months.indexOf(parts[0]?.toUpperCase()?.substring(0, 3));
         const year = parseInt(parts[1]);
         if (monIdx !== -1 && !isNaN(year)) {
-          const nextMonIdx = (monIdx + 1) % 12;
-          const nextYear = monIdx === 11 ? year + 1 : year;
+          const totalIdx = monIdx + monthsToAdvance;
+          const nextMonIdx = ((totalIdx % 12) + 12) % 12;
+          const nextYear = year + Math.floor(totalIdx / 12);
           setMonthYear(`${months[nextMonIdx]}-${nextYear}`);
           setCurrentSubmissionStatus(null);   // fresh month, nothing pending
           return;
@@ -244,8 +249,10 @@ const frozenMonth = meta?.monthYear || null; // e.g. MAR-2026
 
 checkApproval(derivedMonthYear);
 
-// Also check if the frozen month itself has an APPROVED submission (failed sanity approved by manager)
-if (frozenMonth) {
+// Only relevant if the frozen month IS the month currently displayed — otherwise
+// this is just confirming last cycle's freeze and must NOT overwrite this
+// cycle's real status.
+if (frozenMonth && frozenMonth === derivedMonthYear) {
   getSanitySubmission(projectId, frozenMonth).then(data => {
     if (data?.status === "APPROVED") {
       localStorage.setItem("sanityPassed", JSON.stringify(true));
@@ -257,7 +264,7 @@ if (frozenMonth) {
 
 const interval = setInterval(() => {
   checkApproval(derivedMonthYear);
-  if (frozenMonth) {
+  if (frozenMonth && frozenMonth === derivedMonthYear) {
     getSanitySubmission(projectId, frozenMonth).then(data => {
       if (data?.status === "APPROVED") {
         localStorage.setItem("sanityPassed", JSON.stringify(true));
