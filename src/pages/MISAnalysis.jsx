@@ -1809,16 +1809,16 @@ if (isMisLocked) {
                 <span className="text-xl font-black text-emerald-600">₹{formatValue(auditTotals.receivedIncrement)}</span>
               </div>
               <div className="flex flex-col border-l border-gray-100 pl-4">
-                <span className="text-[10px] text-gray-400 uppercase font-bold mb-1">Net Collection</span>
-                <span className="text-xl font-black text-blue-600">
-                  ₹{formatValue(auditTotals.receivedIncrement - auditTotals.cancelledAmountReceived)}
-                </span>
-                <span className="text-[10px] text-gray-400 mt-1">Actual − Cancelled</span>
-              </div>
+  <span className="text-[10px] text-gray-400 uppercase font-bold mb-1">Net Collection</span>
+  <span className="text-xl font-black text-blue-600">
+    ₹{formatValue(auditTotals.receivedIncrement - auditTotals.cancelledAmountReceived - auditTotals.receivedDecrement)}
+  </span>
+  <span className="text-[10px] text-gray-400 mt-1">Actual − Cancelled − Decreased</span>
+</div>
             </div>
             <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
               {(() => {
-                const net = auditTotals.receivedIncrement - auditTotals.cancelledAmountReceived;
+                const net = auditTotals.receivedIncrement - auditTotals.cancelledAmountReceived - auditTotals.receivedDecrement;
 const planned = bpTargets.planned_collection;
                 const surplus = net >= planned;
                 const diff = Math.abs(net - planned);
