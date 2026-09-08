@@ -411,7 +411,7 @@ useEffect(() => {
       let rawRowsUrl = "";
       try {
         const jsonBlob = new Blob(
-          [JSON.stringify({ raw_rows: data.raw_rows, all_bill_months: data.all_bill_months, revised_ctc_headers: data.revised_ctc_headers || [] })],
+          [JSON.stringify({ raw_rows: data.raw_rows, all_bill_months: data.all_bill_months, revised_ctc_headers: data.revised_ctc_headers || [], bp_ctc_header: data.bp_ctc_header || "CTC As Per BP" })],
           { type: "application/json" }
         );
         const jsonRef = ref(storage,
@@ -593,15 +593,15 @@ monthsToUse.forEach(month => {
 });
       const totalCostIncurred = preRaw + postSum;
       let escalation = 0;
-      if (row.bp_ctc === row.revised_ctc) {
-        escalation = (totalCostIncurred / 10000000) - row.revised_ctc;
-      } else {
-        escalation = row.revised_ctc - row.bp_ctc;
-      }
+if (row.bp_ctc === row.revised_ctc) {
+  escalation = row.bp_ctc - (totalCostIncurred / 10000000);
+} else {
+  escalation = row.revised_ctc - row.bp_ctc;
+}
       const balanceBP = bpCtcRaw - totalCostIncurred;
       const balanceCTC = revisedCtcRaw - totalCostIncurred;
       const balancePct = revisedCtcRaw > 0 ? (balanceCTC / revisedCtcRaw) * 100 : 0;
-      const nearBudget = revisedCtcRaw > 0 && balancePct < 15;
+      const nearBudget = revisedCtcRaw > 0 && balancePct < 25;
       return {
         particular: row.particular, bp_ctc: row.bp_ctc, revised_ctc: row.revised_ctc,
         all_revised_ctcs: allRevisedCtcs,
@@ -767,7 +767,7 @@ monthsToUse.forEach(month => {
             <th className="px-4 py-3 border border-gray-200 text-center text-indigo-600 font-black uppercase text-[12px]">Balance CTC incl. Escalation</th>
           </tr>
           <tr className="bg-indigo-50">
-            <th className="px-3 py-2 border border-gray-200 text-[11px] text-gray-500 font-bold text-center whitespace-nowrap">CTC As Per BP</th>
+            <th className="px-3 py-2 border border-gray-200 text-[11px] text-gray-500 font-bold text-center whitespace-nowrap">{data?.bp_ctc_header || "CTC As Per BP"}</th>
             {(data?.revised_ctc_headers || ["Revised CTC"]).map((hdr, i) => (
               <th key={i} className="px-3 py-2 border border-gray-200 text-[11px] text-gray-500 font-bold text-center whitespace-nowrap">{hdr}</th>
             ))}
@@ -1099,12 +1099,13 @@ monthsToUse.forEach(month => {
                       });
                     });
                     setData({
-                      raw_rows: rawRows,
-                      all_bill_months: sub.allBillMonths || [],
-                      revised_ctc_headers: json.revised_ctc_headers || null,
-                      extracted_bills: { columns: cols, data: allTransactions },
-                      bp_stats: sub.bpStats || {}
-                    });
+  raw_rows: rawRows,
+  all_bill_months: sub.allBillMonths || [],
+  revised_ctc_headers: json.revised_ctc_headers || null,
+  bp_ctc_header: json.bp_ctc_header || "CTC As Per BP",
+  extracted_bills: { columns: cols, data: allTransactions },
+  bp_stats: sub.bpStats || {}
+});
                   } else {
                     // Fallback for old submissions that had rawRows in Firestore
                     const cols = ["Tranche","Payment Clearance date","Month","Costing Particular","Supplier/ Vendor/Customer/Salaries/Others","Name","Payment cleared"];
