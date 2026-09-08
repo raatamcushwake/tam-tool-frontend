@@ -22,6 +22,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage, db } from "../services/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { getCycleState } from "../services/cycleStateService";
+import { getProjectRoleMembers } from "../services/teamService";
 import { getSanityForAnalysis, downloadFrozenSanityAsFile, uploadFrozenSanityFile, markSanityAnalysisApproved } from "../services/misSanitySubmissionService";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
@@ -94,6 +95,15 @@ export default function MISAnalysis() {
 const [cycleStateData, setCycleStateData] = useState(null);
 const [misRejectionInfo, setMisRejectionInfo] = useState(null);
 const [cycleLoading, setCycleLoading] = useState(true);
+const [hasDistinctReviewer, setHasDistinctReviewer] = useState(true);
+
+useEffect(() => {
+  const projectId = selectedProject?.projectId;
+  if (!projectId) return;
+  getProjectRoleMembers(projectId).then(({ hasDistinctReviewer }) => {
+    setHasDistinctReviewer(hasDistinctReviewer);
+  });
+}, [selectedProject]);
 
   useEffect(() => {
   const handleStorageChange = () => {
@@ -871,9 +881,10 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
   monthYear,
   currFileURL,
   sanityCheckPassed: cycleStateData?.sanityCheckPassed ?? null,
+  initialStatus: hasDistinctReviewer ? "PENDING_REVIEW" : "PENDING_MANAGER",
 });
     if (result.success) {
-      setCurrentSubmissionStatus('PENDING_REVIEW');
+      setCurrentSubmissionStatus(hasDistinctReviewer ? 'PENDING_REVIEW' : 'PENDING_MANAGER');
       makerCommentRef.current = '';
       alert('✅ Submitted for Review successfully!');
     } else {
@@ -979,9 +990,10 @@ const result = await submitMISForReview(selectedProject.projectId, monthYear, {
       selectedProject.projectId,
       selectedSubmission.monthYear,
       currentUser.email,
-      managerCommentRef.current
+      managerCommentRef.current,
+      hasDistinctReviewer
     );
-    alert('❌ Rejected. Sent back to Reviewer.');
+    alert(hasDistinctReviewer ? '❌ Rejected. Sent back to Reviewer.' : '❌ Rejected. Sent back to Maker.');
   }
   managerCommentRef.current = '';
   getAllMISSubmissions(selectedProject.projectId).then(setAllSubmissions);
@@ -2787,7 +2799,7 @@ const planned = bpTargets.planned_collection;
                   <p className="text-sm font-black uppercase text-gray-400 mb-3">
                     {isReviewer ? '👁 Reviewer Action' : '✅ Manager Final Action'} — {selectedSubmission.monthYear}
                   </p>
-                  {isManager && selectedSubmission.status === 'PENDING_REVIEW' && (
+                  {isManager && selectedSubmission.status === 'PENDING_REVIEW' && hasDistinctReviewer && (
   <p className="text-xs text-amber-600 font-semibold mb-3">
     ⚠ Reviewer hasn't reviewed this yet. Approving here will act on the Reviewer's behalf and finalize it in one step.
   </p>
