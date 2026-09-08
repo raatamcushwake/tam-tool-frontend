@@ -18,6 +18,7 @@ import {
   getFrozenSanityMetadata, downloadFrozenSanityAsFile,
   uploadProofDocument, STATUS_CONFIG
 } from "../services/misSanitySubmissionService";
+import { getProjectRoleMembers } from "../services/teamService";
 
 function FileUploadBox({ label, subtitle, file, onFileSelect, onClear, accent = "blue" }) {
   const inputRef = useRef(null);
@@ -137,6 +138,15 @@ const monthsToAdvance = isPeriodic ? 3 : 1;
   const [resolvedPrevFile, setResolvedPrevFile] = useState(null);
   const [passConfirmed, setPassConfirmed] = useState(false);
   const [submissionSanityPassed, setSubmissionSanityPassed] = useState(null);
+  const [hasDistinctReviewer, setHasDistinctReviewer] = useState(true);
+
+useEffect(() => {
+  const projectId = selectedProject?.projectId;
+  if (!projectId) return;
+  getProjectRoleMembers(projectId).then(({ hasDistinctReviewer }) => {
+    setHasDistinctReviewer(hasDistinctReviewer);
+  });
+}, [selectedProject]);
 
   const makerCommentRef = useRef("");
   const reviewerCommentRef = useRef("");
@@ -494,26 +504,27 @@ try {
     }
 
     const result = await submitSanityForReview(selectedProject.projectId, monthYear, {
-      submittedBy: currentUser.email,
-      monthYear,
-      makerComment: makerCommentRef.current,
-      makerProofDocuments,
-      unitAnnotations,
-      currFileURL,
-      prevFileURL,
-      sanityCheckPassed: results.sanity_check_passed,
-      issues: results.issues || [],
-      summary: results.summary || {},
-      units: results.units || [],
-      newBookings: results.new_bookings || [],
-      transferredUnits: results.transferred_units || [],
-      nameCorrections: results.name_corrections || [],
-      cancelledUnits: results.cancelled_units || [],
-      duplicateUnits: results.duplicate_units || [],
-      anomalyUnits: results.anomaly_units || [],
-      decreases: results.decreases || {},
-      increases: results.increases || {},
-    });
+  submittedBy: currentUser.email,
+  monthYear,
+  makerComment: makerCommentRef.current,
+  makerProofDocuments,
+  unitAnnotations,
+  currFileURL,
+  prevFileURL,
+  sanityCheckPassed: results.sanity_check_passed,
+  issues: results.issues || [],
+  summary: results.summary || {},
+  units: results.units || [],
+  newBookings: results.new_bookings || [],
+  transferredUnits: results.transferred_units || [],
+  nameCorrections: results.name_corrections || [],
+  cancelledUnits: results.cancelled_units || [],
+  duplicateUnits: results.duplicate_units || [],
+  anomalyUnits: results.anomaly_units || [],
+  decreases: results.decreases || {},
+  increases: results.increases || {},
+  initialStatus: hasDistinctReviewer ? "PENDING_REVIEW" : "PENDING_MANAGER",
+});
 
     if (result.success) {
       const { setCycleState } = await import("../services/cycleStateService");
@@ -522,7 +533,7 @@ try {
         analysisUnlocked: true,
         sanityCheckPassed: results.sanity_check_passed,
       });
-      setCurrentSubmissionStatus('PENDING_REVIEW');
+      setCurrentSubmissionStatus(hasDistinctReviewer ? 'PENDING_REVIEW' : 'PENDING_MANAGER');
       makerCommentRef.current = '';
       setUnitRemarks({});
       setUnitDocs({});
@@ -626,9 +637,10 @@ try {
         selectedProject.projectId,
         selectedSubmission.monthYear,
         currentUser.email,
-        managerCommentRef.current
+        managerCommentRef.current,
+        hasDistinctReviewer
       );
-      alert('❌ Rejected. Sent back to Reviewer.');
+      alert(hasDistinctReviewer ? '❌ Rejected. Sent back to Reviewer.' : '❌ Rejected. Sent back to Maker.');
     }
     managerCommentRef.current = '';
     getAllSanitySubmissions(selectedProject.projectId).then(setAllSubmissions);
@@ -1567,7 +1579,7 @@ try {
     If you reject, it goes back to Reviewer with your comments.
   </p>
 )}
-                  {isManager && selectedSubmission.status === 'PENDING_REVIEW' && (
+                  {isManager && selectedSubmission.status === 'PENDING_REVIEW' && hasDistinctReviewer && (
   <p className="text-xs text-amber-600 font-semibold mb-3">
     ⚠ Reviewer hasn't reviewed this yet. Approving here will act on the Reviewer's behalf and finalize it in one step.
   </p>
