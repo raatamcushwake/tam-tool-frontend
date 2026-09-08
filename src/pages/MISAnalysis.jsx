@@ -2547,7 +2547,7 @@ const planned = bpTargets.planned_collection;
             <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center shrink-0">
               <FileSpreadsheet size={22} className="text-blue-600" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-xs font-black uppercase tracking-widest text-gray-400">Sanity-Approved Month Ready For Analysis</p>
               <p className="text-lg font-black text-gray-900">
                 {cycleStateData?.cycleMonth || "No approved month found"}
@@ -2556,6 +2556,15 @@ const planned = bpTargets.planned_collection;
                 Files are auto-loaded from the approved Sanity Check submission — no upload needed.
               </p>
             </div>
+            {cycleStateData?.cycleMonth && currentSubmissionStatus !== 'APPROVED' && (
+              <button
+                type="button"
+                onClick={() => navigate("/mis-sanity")}
+                className="shrink-0 flex items-center gap-2 text-xs font-bold text-blue-600 underline hover:text-blue-700">
+                <Upload size={13} />
+                Need changes? Re-upload MIS
+              </button>
+            )}
           </div>
 
           {currentSubmissionStatus === 'APPROVED' && (
